@@ -61,9 +61,13 @@ Preferences > Editor > "Preview editor (virtualized)" swaps egui's TextEdit
 for Notey's own editor widget (`src/editor.rs`): it lays out only the
 visible lines, so large files stay responsive, and it owns its
 cursor/selection/undo model (the foundation for multi-cursor, folding, and
-markers on the Notepad++ roadmap). Preview limitations: no word wrap and no
-IME composition yet. Default off; the classic editor remains the default
-until parity. Core logic is unit-tested (`cargo test`).
+markers on the Notepad++ roadmap). It supports word wrap (per-line wrap-row
+cache with placeholder invalidation), spellcheck with right-click
+suggestions, visual-row cursor navigation, undo integration for
+find/replace and plugin edits, and basic IME (caret-anchored candidate
+window, committed text insertion — no inline composition preview yet).
+Default off; the classic editor remains the default until parity. Core
+logic is unit-tested (`cargo test`).
 
 ## Plugins (Rhai scripts)
 

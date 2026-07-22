@@ -508,8 +508,8 @@ impl NoteyApp {
 
     fn apply_script_result(&mut self, ctx: &egui::Context, out: ScriptCtx) {
         if out.text_dirty {
-            self.docs[self.active].text = out.text;
-            self.touch_active();
+            let old_n = self.docs[self.active].text.chars().count();
+            self.edit_text(ctx, (0, old_n), &out.text);
         }
         if out.sel_dirty {
             self.set_cursor(ctx, out.sel.0, out.sel.1);
@@ -624,25 +624,11 @@ impl NoteyApp {
     }
 
     fn insert_at_cursor(&mut self, ctx: &egui::Context, s: &str) {
-        if self.preview_editor {
-            let now = ctx.input(|i| i.time);
-            let doc = &mut self.docs[self.active];
-            let state = self.editor_states.entry(doc.id).or_default();
-            let sel = state.selection();
-            state.apply_edit(&mut doc.text, sel, s, now);
-            self.focus_editor = true;
-            return;
-        }
-        let (start, end) = self.cursor_range(ctx).unwrap_or_else(|| {
+        let range = self.cursor_range(ctx).unwrap_or_else(|| {
             let n = self.docs[self.active].text.chars().count();
             (n, n)
         });
-        let text = &mut self.docs[self.active].text;
-        let sb = char_to_byte(text, start);
-        let eb = char_to_byte(text, end);
-        text.replace_range(sb..eb, s);
-        let new_pos = start + s.chars().count();
-        self.set_cursor(ctx, new_pos, new_pos);
+        self.edit_text(ctx, range, s);
     }
 
     fn insert_time_date(&mut self, ctx: &egui::Context) {
@@ -683,10 +669,7 @@ impl NoteyApp {
                 };
                 if matches {
                     let replacement = self.replace_text.clone();
-                    self.docs[self.active].text.replace_range(sb..eb, &replacement);
-                    self.touch_active();
-                    let after = a + replacement.chars().count();
-                    self.set_cursor(ctx, after, after);
+                    self.edit_text(ctx, (a, b), &replacement);
                 }
             }
         }
@@ -721,8 +704,8 @@ impl NoteyApp {
             }
         }
         if count > 0 {
-            self.docs[self.active].text = out;
-            self.touch_active();
+            let old_n = self.docs[self.active].text.chars().count();
+            self.edit_text(ctx, (0, old_n), &out);
             self.set_cursor(ctx, 0, 0);
         }
         self.flash(format!("Replaced {count} occurrence(s)"));
@@ -1532,13 +1515,7 @@ impl NoteyApp {
         });
 
         if let Some((a, b, s)) = replace_with {
-            let text = &mut self.docs[self.active].text;
-            let sb = char_to_byte(text, a);
-            let eb = char_to_byte(text, b);
-            text.replace_range(sb..eb, &s);
-            self.touch_active();
-            let after = a + s.chars().count();
-            self.set_cursor(ctx, after, after);
+            self.edit_text(ctx, (a, b), &s);
             self.ctx_word = None;
         }
         if let Some(w) = add_word {
@@ -1563,7 +1540,7 @@ impl NoteyApp {
         let doc = &mut self.docs[self.active];
         let state = self.editor_states.entry(doc.id).or_default();
         let spell = if spell_on { Some(&self.spell) } else { None };
-        let _ = editor::show(
+        let result = editor::show(
             ui,
             editor_id,
             &mut doc.text,
@@ -1571,10 +1548,34 @@ impl NoteyApp {
             state,
             &th,
             self.show_line_numbers,
+            self.word_wrap,
             spell,
             request_focus,
         );
+        if let Some(word) = result.add_word {
+            self.spell.add_word(&word);
+        }
         let _ = ctx;
+    }
+
+    /// Replace a char range in the active document, routing through the
+    /// preview editor's undo stack when it is active.
+    fn edit_text(&mut self, ctx: &egui::Context, range: (usize, usize), s: &str) {
+        if self.preview_editor {
+            let now = ctx.input(|i| i.time);
+            let doc = &mut self.docs[self.active];
+            let state = self.editor_states.entry(doc.id).or_default();
+            state.apply_edit(&mut doc.text, range, s, now);
+            self.focus_editor = true;
+            return;
+        }
+        let text = &mut self.docs[self.active].text;
+        let sb = char_to_byte(text, range.0.min(range.1));
+        let eb = char_to_byte(text, range.0.max(range.1));
+        text.replace_range(sb..eb, s);
+        self.touch_active();
+        let after = range.0.min(range.1) + s.chars().count();
+        self.set_cursor(ctx, after, after);
     }
 
     /// Bump the active document's revision after a text mutation that
@@ -1838,7 +1839,8 @@ impl NoteyApp {
                         ui.checkbox(&mut self.preview_editor, "Preview editor (virtualized)")
                             .on_hover_text(
                                 "Lays out only visible lines — much faster on large files. \
-                                 Preview limitations: no word wrap or IME composition yet.",
+                                 Supports word wrap, spellcheck, and basic IME. Preview \
+                                 limitation: no inline IME composition preview yet.",
                             );
                         ui.end_row();
                     });

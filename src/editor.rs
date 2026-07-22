@@ -1,4 +1,4 @@
-//! Preview editor: a virtualized text-editing widget.
+﻿//! Preview editor: a virtualized text-editing widget.
 //!
 //! Unlike egui's `TextEdit` (which lays out the whole buffer as one galley),
 //! this widget lays out **only the visible lines**, so multi-megabyte files
@@ -51,6 +51,20 @@ pub struct EditorState {
 
     undo: Vec<EditOp>,
     redo: Vec<EditOp>,
+
+    /// Misspelled word under the last right-click: (start, end, word).
+    ctx_word: Option<(usize, usize, String)>,
+    ctx_suggestions: Vec<String>,
+
+    /// Wrapped-row count per line (u32::MAX = needs layout).
+    wrap_rows: Vec<u32>,
+    /// wrap_prefix[i] = visual rows before line i; len = lines + 1.
+    wrap_prefix: Vec<u32>,
+    wrap_valid: bool,
+    /// (wrap width bits, font size bits) the cache was built for.
+    wrap_key: (u32, u32),
+    /// Preserved x position for repeated Up/Down.
+    desired_x: Option<f32>,
 }
 
 impl EditorState {
@@ -100,6 +114,18 @@ impl EditorState {
 
     pub fn line_count(&self) -> usize {
         self.lines.len()
+    }
+
+    fn total_visual_rows(&self) -> u32 {
+        *self.wrap_prefix.last().unwrap_or(&1).max(&1)
+    }
+
+    fn line_at_visual_row(&self, v: u32) -> usize {
+        let last = self.line_count().saturating_sub(1);
+        match self.wrap_prefix.binary_search(&v) {
+            Ok(i) => i.min(last),
+            Err(i) => i.saturating_sub(1).min(last),
+        }
     }
 
     /// Line containing the given char offset.
@@ -153,6 +179,9 @@ impl EditorState {
         self.ensure_index(text);
         let (a, b) = (range.0.min(range.1), range.0.max(range.1));
         let (a, b) = (a.min(self.total_chars), b.min(self.total_chars));
+        let first_line = self.line_of_char(a);
+        let last_line_old = self.line_of_char(b);
+        let old_lines = self.line_count();
         let ab = self.char_to_byte(text, a);
         let bb = self.char_to_byte(text, b);
         let removed = text[ab..bb].to_string();
@@ -162,7 +191,25 @@ impl EditorState {
         self.anchor = after;
         self.cursor = after;
         self.scroll_to_cursor = true;
+        self.desired_x = None;
         self.rebuild_index(text);
+
+        // keep the wrap cache aligned: replace the edited lines' row counts
+        // with placeholders that get laid out lazily
+        if self.wrap_valid {
+            let span_old = last_line_old - first_line + 1;
+            let new_lines = self.line_count();
+            let span_new =
+                (span_old as i64 + new_lines as i64 - old_lines as i64).max(1) as usize;
+            if first_line + span_old <= self.wrap_rows.len() {
+                self.wrap_rows.splice(
+                    first_line..first_line + span_old,
+                    std::iter::repeat(u32::MAX).take(span_new),
+                );
+            } else {
+                self.wrap_valid = false;
+            }
+        }
 
         // group rapid single-character typing into one undo step
         let mergeable = removed.is_empty()
@@ -206,6 +253,7 @@ impl EditorState {
         let ab = self.char_to_byte(text, a);
         let eb = self.char_to_byte(text, end);
         text.replace_range(ab..eb, &op.removed);
+        self.wrap_valid = false;
         self.rebuild_index(text);
         self.anchor = op.sel_before.0.min(self.total_chars);
         self.cursor = op.sel_before.1.min(self.total_chars);
@@ -221,6 +269,7 @@ impl EditorState {
         let ab = self.char_to_byte(text, a);
         let eb = self.char_to_byte(text, end);
         text.replace_range(ab..eb, &op.inserted);
+        self.wrap_valid = false;
         self.rebuild_index(text);
         self.anchor = op.sel_after.0.min(self.total_chars);
         self.cursor = op.sel_after.1.min(self.total_chars);
@@ -232,6 +281,7 @@ impl EditorState {
     /// undo history for those changes is not tracked in the preview editor.
     pub fn note_external_change(&mut self) {
         self.indexed_once = false;
+        self.wrap_valid = false;
         self.undo.clear();
         self.redo.clear();
     }
@@ -304,6 +354,8 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
 
 pub struct ShowResult {
     pub changed: bool,
+    /// "Add to dictionary" was clicked for this word.
+    pub add_word: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -315,11 +367,13 @@ pub fn show(
     state: &mut EditorState,
     th: &EditorTheme,
     show_line_numbers: bool,
+    wrap: bool,
     spell: Option<&Spell>,
     request_focus: bool,
 ) -> ShowResult {
     state.sync(text, revision);
     let mut changed = false;
+    let mut add_word: Option<String> = None;
     let now = ui.input(|i| i.time);
 
     let char_w = ui.fonts_mut(|f| f.glyph_width(&th.font, '0')).max(1.0);
@@ -333,19 +387,47 @@ pub fn show(
         0.0
     };
 
-    let est_width =
-        gutter_w + state.max_line_chars as f32 * char_w * 1.05 + 120.0;
+    // wrap width: fit the viewport minus gutter, paddings, and scrollbar
+    let avail_w = ui.available_width();
+    let wrap_w: Option<f32> = if wrap {
+        Some((avail_w - gutter_w - 6.0 - 18.0).max(char_w * 4.0))
+    } else {
+        None
+    };
+
+    // ---- wrap cache (row counts per line + prefix sums) ----
+    let wrap_key = (
+        wrap_w.map(|w| w.to_bits()).unwrap_or(u32::MAX),
+        th.font.size.to_bits(),
+    );
+    if !state.wrap_valid || state.wrap_key != wrap_key || state.wrap_rows.len() != n_lines {
+        state.wrap_rows = vec![u32::MAX; n_lines];
+        state.wrap_key = wrap_key;
+        state.wrap_valid = true;
+    }
+    fill_wrap_cache(state, text, ui, th, spell, wrap_w);
+
+    let est_width = gutter_w + state.max_line_chars as f32 * char_w * 1.05 + 120.0;
+    let content_w = if wrap {
+        avail_w - 4.0
+    } else {
+        est_width.max(avail_w)
+    };
     let total = egui::vec2(
-        est_width.max(ui.available_width()),
-        n_lines as f32 * row_h + row_h * 2.0,
+        content_w,
+        state.total_visual_rows() as f32 * row_h + row_h * 2.0,
     );
 
-    egui::ScrollArea::both()
+    let scroll = if wrap {
+        egui::ScrollArea::vertical()
+    } else {
+        egui::ScrollArea::both()
+    };
+    scroll
         .id_salt(editor_id.with("scroll"))
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
-            let (rect, resp) =
-                ui.allocate_exact_size(total, Sense::click_and_drag());
+            let (rect, resp) = ui.allocate_exact_size(total, Sense::click_and_drag());
             let text_x = rect.left() + gutter_w + 6.0;
             let painter = ui.painter_at(ui.clip_rect());
 
@@ -354,41 +436,50 @@ pub fn show(
             }
             let focused = ui.memory(|m| m.has_focus(editor_id));
 
-            // ---- mouse → cursor ----
-            fn pos_to_char(
-                state: &EditorState,
-                text: &str,
-                pos: egui::Pos2,
-                ui: &egui::Ui,
-                th: &EditorTheme,
-                rect_top: f32,
-                text_x: f32,
-                row_h: f32,
-            ) -> usize {
-                let n = state.line_count();
-                let line = (((pos.y - rect_top) / row_h).floor().max(0.0) as usize)
-                    .min(n.saturating_sub(1));
-                let (slice, start_chr) = state.line_slice(text, line);
-                let galley = line_galley(ui, slice, th, None);
-                let col = usize::from(
-                    galley
-                        .cursor_from_pos(egui::vec2(pos.x - text_x, 0.0))
-                        .index,
-                );
-                start_chr + col.min(slice.chars().count())
+            // capture the misspelled word under a right-click for the menu
+            if resp.secondary_clicked() {
+                state.ctx_word = None;
+                state.ctx_suggestions.clear();
+                if let (Some(sp), Some(pos)) = (spell, resp.interact_pointer_pos()) {
+                    let c = pos_to_char(
+                        state, text, pos, ui, th, spell, wrap_w, rect.top(), text_x, row_h,
+                    );
+                    let line = state.line_of_char(c);
+                    let (slice, start_chr) = state.line_slice(text, line);
+                    let chars: Vec<char> = slice.chars().collect();
+                    let col = c.saturating_sub(start_chr).min(chars.len().saturating_sub(1));
+                    if !chars.is_empty() && spell::is_word_char(chars[col]) {
+                        let mut a = col;
+                        while a > 0 && spell::is_word_char(chars[a - 1]) {
+                            a -= 1;
+                        }
+                        let mut b = col + 1;
+                        while b < chars.len() && spell::is_word_char(chars[b]) {
+                            b += 1;
+                        }
+                        let word: String = chars[a..b].iter().collect();
+                        let prev = if a > 0 { Some(chars[a - 1]) } else { None };
+                        if spell::checkable(&word, prev) && !sp.check(&word) {
+                            state.ctx_suggestions = sp.suggest(&word);
+                            state.ctx_word = Some((start_chr + a, start_chr + b, word));
+                        }
+                    }
+                }
             }
 
+            // ---- mouse â†’ cursor ----
             if let Some(pos) = resp.interact_pointer_pos() {
-                let c = pos_to_char(state, text, pos, ui, th, rect.top(), text_x, row_h);
+                let c = pos_to_char(
+                    state, text, pos, ui, th, spell, wrap_w, rect.top(), text_x, row_h,
+                );
                 let shift = ui.input(|i| i.modifiers.shift);
                 if resp.double_clicked() {
                     let line = state.line_of_char(c);
                     let (slice, start_chr) = state.line_slice(text, line);
                     let chars: Vec<char> = slice.chars().collect();
                     let (a, b) = word_bounds(&chars, c.saturating_sub(start_chr));
-                    let (a, b) = (start_chr + a, start_chr + b);
-                    state.anchor = a;
-                    state.cursor = b;
+                    state.anchor = start_chr + a;
+                    state.cursor = start_chr + b;
                 } else if resp.triple_clicked() {
                     let line = state.line_of_char(c);
                     let (slice, start_chr) = state.line_slice(text, line);
@@ -400,6 +491,7 @@ pub fn show(
                     if !shift {
                         state.anchor = c;
                     }
+                    state.desired_x = None;
                 } else if resp.dragged() {
                     state.cursor = c;
                 } else if resp.clicked() {
@@ -407,18 +499,17 @@ pub fn show(
                     if !shift {
                         state.anchor = c;
                     }
+                    state.desired_x = None;
                 }
             }
 
             // ---- keyboard ----
             if focused {
                 let events = ui.input(|i| i.events.clone());
-                let page = (viewport.height() / row_h).max(1.0) as usize;
+                let page = (viewport.height() / row_h).max(1.0) as i64;
                 for ev in &events {
                     match ev {
                         Event::Text(s) => {
-                            // Tab/Enter arrive as Key events; skip control-only
-                            // text to avoid double insertion.
                             if s.chars().all(|c| c.is_control()) {
                                 continue;
                             }
@@ -427,7 +518,6 @@ pub fn show(
                             changed = true;
                         }
                         Event::Paste(s) => {
-                            // normalize Windows clipboard line endings
                             let s = s.replace("\r\n", "\n").replace('\r', "\n");
                             let sel = state.selection();
                             state.apply_edit(text, sel, &s, now);
@@ -445,16 +535,42 @@ pub fn show(
                                 }
                             }
                         }
+                        Event::Ime(egui::ImeEvent::Commit(s)) => {
+                            let sel = state.selection();
+                            state.apply_edit(text, sel, s, now);
+                            changed = true;
+                        }
                         Event::Key {
                             key,
                             pressed: true,
                             modifiers,
                             ..
                         } => {
-                            if handle_key(
-                                state, text, *key, *modifiers, page, now, &mut changed,
-                            ) {
+                            let vertical = match key {
+                                Key::ArrowUp => Some(-1i64),
+                                Key::ArrowDown => Some(1),
+                                Key::PageUp => Some(-page),
+                                Key::PageDown => Some(page),
+                                _ => None,
+                            };
+                            if let Some(delta) = vertical {
+                                // refresh geometry in case earlier events edited
+                                fill_wrap_cache(state, text, ui, th, spell, wrap_w);
+                                vertical_move(
+                                    state,
+                                    text,
+                                    ui,
+                                    th,
+                                    spell,
+                                    wrap_w,
+                                    delta,
+                                    modifiers.shift,
+                                );
                                 state.scroll_to_cursor = true;
+                            } else if handle_key(state, text, *key, *modifiers, now, &mut changed)
+                            {
+                                state.scroll_to_cursor = true;
+                                state.desired_x = None;
                             }
                         }
                         _ => {}
@@ -462,16 +578,24 @@ pub fn show(
                 }
             }
 
-            // ---- visible range (line count may have changed from edits) ----
+            // edits above may have changed geometry
+            fill_wrap_cache(state, text, ui, th, spell, wrap_w);
             let n_lines = state.line_count();
-            let first =
-                ((viewport.top() / row_h).floor().max(0.0) as usize).min(n_lines - 1);
-            let last = (((viewport.bottom() / row_h).ceil()) as usize + 1).min(n_lines);
+            let total_rows = state.total_visual_rows();
             let (sel_a, sel_b) = state.selection();
             let cursor_line = state.line_of_char(state.cursor);
 
+            // ---- visible range ----
+            let v_first = ((viewport.top() / row_h).floor().max(0.0) as u32)
+                .min(total_rows.saturating_sub(1));
+            let v_last = ((viewport.bottom() / row_h).ceil().max(0.0) as u32 + 1).min(total_rows);
+            let first = state.line_at_visual_row(v_first);
+            let last = (state.line_at_visual_row(v_last.saturating_sub(1)) + 1).min(n_lines);
+
             for li in first..last {
-                let y = rect.top() + li as f32 * row_h;
+                let y = rect.top() + state.wrap_prefix[li] as f32 * row_h;
+                let line_rows = state.wrap_rows[li].max(1);
+                let line_h = line_rows as f32 * row_h;
                 let (slice, start_chr) = state.line_slice(text, li);
                 let line_chars = slice.chars().count();
                 let line_end = start_chr + line_chars;
@@ -481,69 +605,117 @@ pub fn show(
                     painter.rect_filled(
                         egui::Rect::from_min_size(
                             egui::pos2(rect.left(), y),
-                            egui::vec2(rect.width(), row_h),
+                            egui::vec2(rect.width(), line_h),
                         ),
                         0.0,
                         th.current_line,
                     );
                 }
 
-                let galley = line_galley(ui, slice, th, spell);
+                let galley = line_galley(ui, slice, th, spell, wrap_w);
 
-                // selection highlight
+                // selection highlight (may span wrapped rows)
                 if sel_a != sel_b && sel_a < line_end + 1 && sel_b > start_chr {
                     let a = sel_a.max(start_chr) - start_chr;
                     let b = sel_b.min(line_end) - start_chr;
-                    let x0 = galley.pos_from_cursor(CCursor::new(a)).left();
-                    let mut x1 = galley.pos_from_cursor(CCursor::new(b)).left();
+                    let ra = galley.pos_from_cursor(CCursor::new(a));
+                    let rb = galley.pos_from_cursor(CCursor::new(b));
+                    let right_edge = wrap_w.unwrap_or(f32::INFINITY).min(rect.width());
+                    let mut xb = rb.left();
                     if sel_b > line_end {
-                        x1 += char_w * 0.6; // show the selected newline
+                        xb += char_w * 0.6; // show the selected newline
                     }
-                    painter.rect_filled(
-                        egui::Rect::from_min_max(
-                            egui::pos2(text_x + x0, y),
-                            egui::pos2(text_x + x1.max(x0 + 1.0), y + row_h),
-                        ),
-                        0.0,
-                        th.selection,
-                    );
+                    if (ra.top() - rb.top()).abs() < 0.5 {
+                        painter.rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(text_x + ra.left(), y + ra.top()),
+                                egui::pos2(
+                                    text_x + xb.max(ra.left() + 1.0),
+                                    y + ra.top() + row_h,
+                                ),
+                            ),
+                            0.0,
+                            th.selection,
+                        );
+                    } else {
+                        // first row: from a to the wrap edge
+                        painter.rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(text_x + ra.left(), y + ra.top()),
+                                egui::pos2(text_x + right_edge, y + ra.top() + row_h),
+                            ),
+                            0.0,
+                            th.selection,
+                        );
+                        // middle rows: full width
+                        if rb.top() - ra.top() > row_h + 0.5 {
+                            painter.rect_filled(
+                                egui::Rect::from_min_max(
+                                    egui::pos2(text_x, y + ra.top() + row_h),
+                                    egui::pos2(text_x + right_edge, y + rb.top()),
+                                ),
+                                0.0,
+                                th.selection,
+                            );
+                        }
+                        // last row: from the left to b
+                        painter.rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(text_x, y + rb.top()),
+                                egui::pos2(text_x + xb.max(1.0), y + rb.top() + row_h),
+                            ),
+                            0.0,
+                            th.selection,
+                        );
+                    }
                 }
 
-                let galley_y = y + (row_h - galley.size().y) / 2.0;
-                painter.galley(egui::pos2(text_x, galley_y), galley.clone(), th.text);
+                painter.galley(egui::pos2(text_x, y), galley.clone(), th.text);
 
                 // caret
                 if li == cursor_line && focused {
                     let blink_on = ((now * 2.0) as i64) % 2 == 0;
+                    let col = state.cursor - start_chr;
+                    let r = galley.pos_from_cursor(CCursor::new(col));
                     if blink_on {
-                        let col = state.cursor - start_chr;
-                        let x = galley.pos_from_cursor(CCursor::new(col)).left();
                         painter.rect_filled(
                             egui::Rect::from_min_size(
-                                egui::pos2(text_x + x, y + 2.0),
+                                egui::pos2(text_x + r.left(), y + r.top() + 2.0),
                                 egui::vec2(1.5, row_h - 4.0),
                             ),
                             0.0,
                             th.caret,
                         );
                     }
+                    // let the OS position the IME candidate window at the caret
+                    let caret_rect = egui::Rect::from_min_size(
+                        egui::pos2(text_x + r.left(), y + r.top()),
+                        egui::vec2(2.0, row_h),
+                    );
+                    ui.ctx().output_mut(|o| {
+                        o.ime = Some(egui::output::IMEOutput {
+                            rect: caret_rect,
+                            cursor_rect: caret_rect,
+                            should_interrupt_composition: false,
+                        });
+                    });
                     ui.ctx()
                         .request_repaint_after(std::time::Duration::from_millis(500));
                 }
 
-                // gutter (pinned: drawn at viewport-left, after text)
+                // gutter (pinned left, numbers on the first visual row)
                 if show_line_numbers {
                     let gx = ui.clip_rect().left();
                     painter.rect_filled(
                         egui::Rect::from_min_size(
                             egui::pos2(gx, y),
-                            egui::vec2(gutter_w, row_h),
+                            egui::vec2(gutter_w, line_h),
                         ),
                         0.0,
                         th.gutter_bg,
                     );
                     painter.text(
-                        egui::pos2(gx + gutter_w - 8.0, y + (row_h - galley.size().y) / 2.0),
+                        egui::pos2(gx + gutter_w - 8.0, y + 2.0),
                         egui::Align2::RIGHT_TOP,
                         (li + 1).to_string(),
                         th.font.clone(),
@@ -556,27 +728,48 @@ pub fn show(
             if state.scroll_to_cursor {
                 state.scroll_to_cursor = false;
                 let line = state.line_of_char(state.cursor);
-                let y = rect.top() + line as f32 * row_h;
                 let (slice, start_chr) = state.line_slice(text, line);
-                let galley = line_galley(ui, slice, th, None);
-                let x = galley
-                    .pos_from_cursor(CCursor::new(state.cursor - start_chr))
-                    .left();
+                let galley = line_galley(ui, slice, th, spell, wrap_w);
+                let r = galley.pos_from_cursor(CCursor::new(state.cursor - start_chr));
+                let y = rect.top() + state.wrap_prefix[line] as f32 * row_h + r.top();
                 let target = egui::Rect::from_min_size(
-                    egui::pos2(text_x + x, y),
+                    egui::pos2(text_x + r.left(), y),
                     egui::vec2(2.0, row_h),
                 );
                 ui.scroll_to_rect(target.expand2(egui::vec2(40.0, row_h)), None);
             }
 
-            // basic context menu
+            // context menu (spell suggestions + clipboard basics)
             resp.context_menu(|ui| {
-                ui.set_min_width(140.0);
+                ui.set_min_width(160.0);
+                if let Some((wa, wb, word)) = state.ctx_word.clone() {
+                    ui.label(
+                        egui::RichText::new(format!("\"{word}\" not in dictionary"))
+                            .italics()
+                            .weak(),
+                    );
+                    if state.ctx_suggestions.is_empty() {
+                        ui.label("(no suggestions)");
+                    } else {
+                        let suggestions = state.ctx_suggestions.clone();
+                        for s in &suggestions {
+                            if ui.button(s).clicked() {
+                                state.apply_edit(text, (wa, wb), s, now);
+                                changed = true;
+                                state.ctx_word = None;
+                                ui.close();
+                            }
+                        }
+                    }
+                    if ui.button("Add to dictionary").clicked() {
+                        add_word = Some(word);
+                        state.ctx_word = None;
+                        ui.close();
+                    }
+                    ui.separator();
+                }
                 let (a, b) = state.selection();
-                if ui
-                    .add_enabled(a != b, egui::Button::new("Cut"))
-                    .clicked()
-                {
+                if ui.add_enabled(a != b, egui::Button::new("Cut")).clicked() {
                     let ab = state.char_to_byte(text, a);
                     let bb = state.char_to_byte(text, b);
                     ui.ctx().copy_text(text[ab..bb].to_string());
@@ -584,10 +777,7 @@ pub fn show(
                     changed = true;
                     ui.close();
                 }
-                if ui
-                    .add_enabled(a != b, egui::Button::new("Copy"))
-                    .clicked()
-                {
+                if ui.add_enabled(a != b, egui::Button::new("Copy")).clicked() {
                     let ab = state.char_to_byte(text, a);
                     let bb = state.char_to_byte(text, b);
                     ui.ctx().copy_text(text[ab..bb].to_string());
@@ -598,6 +788,7 @@ pub fn show(
                         .ok()
                         .and_then(|mut c| c.get_text().ok());
                     if let Some(s) = clip {
+                        let s = s.replace("\r\n", "\n").replace('\r', "\n");
                         let sel = state.selection();
                         state.apply_edit(text, sel, &s, now);
                         changed = true;
@@ -613,7 +804,135 @@ pub fn show(
             });
         });
 
-    ShowResult { changed }
+    ShowResult { changed, add_word }
+}
+
+/// Lay out any lines whose wrapped-row count is unknown, then rebuild the
+/// prefix sums. Cheap when there is nothing to do.
+fn fill_wrap_cache(
+    state: &mut EditorState,
+    text: &str,
+    ui: &egui::Ui,
+    th: &EditorTheme,
+    spell: Option<&Spell>,
+    wrap_w: Option<f32>,
+) {
+    let n = state.lines.len();
+    if state.wrap_rows.len() != n {
+        state.wrap_rows.resize(n, u32::MAX);
+    }
+    let mut any = state.wrap_prefix.len() != n + 1;
+    for i in 0..n {
+        if state.wrap_rows[i] != u32::MAX {
+            continue;
+        }
+        any = true;
+        state.wrap_rows[i] = match wrap_w {
+            None => 1,
+            Some(_) => {
+                let byte0 = state.lines[i].byte;
+                let byte1 = state
+                    .lines
+                    .get(i + 1)
+                    .map(|m| m.byte - 1)
+                    .unwrap_or(text.len())
+                    .max(byte0);
+                let slice = &text[byte0..byte1];
+                if slice.is_empty() {
+                    1
+                } else {
+                    line_galley(ui, slice, th, spell, wrap_w)
+                        .rows
+                        .len()
+                        .max(1) as u32
+                }
+            }
+        };
+    }
+    if any {
+        state.wrap_prefix.clear();
+        state.wrap_prefix.reserve(n + 1);
+        let mut acc = 0u32;
+        state.wrap_prefix.push(0);
+        for r in &state.wrap_rows {
+            acc = acc.saturating_add(*r);
+            state.wrap_prefix.push(acc);
+        }
+    }
+}
+
+/// Hit-test a pointer position to a char offset (wrap-aware).
+#[allow(clippy::too_many_arguments)]
+fn pos_to_char(
+    state: &EditorState,
+    text: &str,
+    pos: egui::Pos2,
+    ui: &egui::Ui,
+    th: &EditorTheme,
+    spell: Option<&Spell>,
+    wrap_w: Option<f32>,
+    rect_top: f32,
+    text_x: f32,
+    row_h: f32,
+) -> usize {
+    let total = state.total_visual_rows();
+    let v = (((pos.y - rect_top) / row_h).floor().max(0.0) as u32)
+        .min(total.saturating_sub(1));
+    let line = state.line_at_visual_row(v);
+    let (slice, start_chr) = state.line_slice(text, line);
+    let galley = line_galley(ui, slice, th, spell, wrap_w);
+    let rel_y = pos.y - rect_top - state.wrap_prefix[line] as f32 * row_h;
+    let col = usize::from(
+        galley
+            .cursor_from_pos(egui::vec2(pos.x - text_x, rel_y))
+            .index,
+    );
+    start_chr + col.min(slice.chars().count())
+}
+
+/// Move the caret by visual rows (handles wrapped lines and preserves the
+/// desired x position across repeated moves).
+#[allow(clippy::too_many_arguments)]
+fn vertical_move(
+    state: &mut EditorState,
+    text: &str,
+    ui: &egui::Ui,
+    th: &EditorTheme,
+    spell: Option<&Spell>,
+    wrap_w: Option<f32>,
+    delta_rows: i64,
+    extend: bool,
+) {
+    let row_h = th.row_height;
+    let line = state.line_of_char(state.cursor);
+    let (slice, start) = state.line_slice(text, line);
+    let galley = line_galley(ui, slice, th, spell, wrap_w);
+    let r = galley.pos_from_cursor(CCursor::new(state.cursor - start));
+    let row_in = ((r.top() / row_h).round().max(0.0)) as i64;
+    let x = state.desired_x.unwrap_or_else(|| r.left());
+    state.desired_x = Some(x);
+
+    let total = state.total_visual_rows() as i64;
+    let cur_v = state.wrap_prefix[line] as i64 + row_in;
+    let target_v = (cur_v + delta_rows).clamp(0, total - 1);
+    if target_v == cur_v {
+        // already at the document edge: jump to start/end
+        let pos = if delta_rows < 0 { 0 } else { state.total_chars };
+        state.cursor = pos;
+        if !extend {
+            state.anchor = pos;
+        }
+        return;
+    }
+    let tline = state.line_at_visual_row(target_v as u32);
+    let (tslice, tstart) = state.line_slice(text, tline);
+    let tgalley = line_galley(ui, tslice, th, spell, wrap_w);
+    let ty = (target_v - state.wrap_prefix[tline] as i64) as f32 * row_h + row_h * 0.5;
+    let col = usize::from(tgalley.cursor_from_pos(egui::vec2(x, ty)).index);
+    state.cursor = tstart + col.min(tslice.chars().count());
+    if !extend {
+        state.anchor = state.cursor;
+    }
 }
 
 fn handle_key(
@@ -621,7 +940,6 @@ fn handle_key(
     text: &mut String,
     key: Key,
     m: Modifiers,
-    page: usize,
     now: f64,
     changed: &mut bool,
 ) -> bool {
@@ -629,7 +947,7 @@ fn handle_key(
     let has_sel = sel_a != sel_b;
     let extend = m.shift;
 
-    let mut move_to = |state: &mut EditorState, pos: usize, extend: bool| {
+    let move_to = |state: &mut EditorState, pos: usize, extend: bool| {
         state.cursor = pos.min(state.total_chars);
         if !extend {
             state.anchor = state.cursor;
@@ -659,28 +977,6 @@ fn handle_key(
             move_to(state, pos, extend);
             true
         }
-        Key::ArrowUp => {
-            let line = state.line_of_char(state.cursor);
-            if line > 0 {
-                let col = state.cursor - state.lines[line].chr;
-                let (prev, prev_chr) = state.line_slice(text, line - 1);
-                move_to(state, prev_chr + col.min(prev.chars().count()), extend);
-            } else {
-                move_to(state, 0, extend);
-            }
-            true
-        }
-        Key::ArrowDown => {
-            let line = state.line_of_char(state.cursor);
-            if line + 1 < state.line_count() {
-                let col = state.cursor - state.lines[line].chr;
-                let (next, next_chr) = state.line_slice(text, line + 1);
-                move_to(state, next_chr + col.min(next.chars().count()), extend);
-            } else {
-                move_to(state, state.total_chars, extend);
-            }
-            true
-        }
         Key::Home => {
             let pos = if m.ctrl {
                 0
@@ -700,18 +996,6 @@ fn handle_key(
                 start + slice.chars().count()
             };
             move_to(state, pos, extend);
-            true
-        }
-        Key::PageUp | Key::PageDown => {
-            let line = state.line_of_char(state.cursor);
-            let col = state.cursor - state.lines[line].chr;
-            let target = if key == Key::PageUp {
-                line.saturating_sub(page)
-            } else {
-                (line + page).min(state.line_count() - 1)
-            };
-            let (slice, start) = state.line_slice(text, target);
-            move_to(state, start + col.min(slice.chars().count()), extend);
             true
         }
         Key::Backspace => {
@@ -816,18 +1100,22 @@ fn next_word(state: &EditorState, text: &str, from: usize) -> usize {
     start + i
 }
 
-/// Layout one line, with optional spellcheck underlines.
+/// Layout one line, with optional spellcheck underlines and wrapping.
+/// `line_height` is pinned to the theme row height so every visual row has
+/// identical geometry (the wrap cache and painters rely on this).
 fn line_galley(
     ui: &egui::Ui,
     slice: &str,
     th: &EditorTheme,
     spell: Option<&Spell>,
+    wrap_w: Option<f32>,
 ) -> std::sync::Arc<egui::Galley> {
     let mut job = LayoutJob::default();
-    job.wrap.max_width = f32::INFINITY;
+    job.wrap.max_width = wrap_w.unwrap_or(f32::INFINITY);
     let normal = TextFormat {
         font_id: th.font.clone(),
         color: th.text,
+        line_height: Some(th.row_height),
         ..Default::default()
     };
     match spell {
@@ -871,10 +1159,10 @@ mod tests {
 
     #[test]
     fn line_slice_and_lookup() {
-        let text = "alpha\nbëta\ngamma";
+        let text = "alpha\nbÃ«ta\ngamma";
         let s = state_for(text);
         assert_eq!(s.line_slice(text, 0).0, "alpha");
-        assert_eq!(s.line_slice(text, 1).0, "bëta");
+        assert_eq!(s.line_slice(text, 1).0, "bÃ«ta");
         assert_eq!(s.line_slice(text, 2).0, "gamma");
         assert_eq!(s.line_of_char(0), 0);
         assert_eq!(s.line_of_char(5), 0); // the newline belongs to line 0's end
@@ -884,9 +1172,9 @@ mod tests {
 
     #[test]
     fn char_to_byte_multibyte() {
-        let text = "héllo\nwörld";
+        let text = "hÃ©llo\nwÃ¶rld";
         let s = state_for(text);
-        // 'é' is 2 bytes: char 2 -> byte 3
+        // 'Ã©' is 2 bytes: char 2 -> byte 3
         assert_eq!(s.char_to_byte(text, 2), 3);
         // char index past end clamps to len
         assert_eq!(s.char_to_byte(text, 999), text.len());
@@ -927,10 +1215,10 @@ mod tests {
 
     #[test]
     fn edit_at_bounds_and_unicode() {
-        let mut text = String::from("日本語\nテスト");
+        let mut text = String::from("æ—¥æœ¬èªž\nãƒ†ã‚¹ãƒˆ");
         let mut s = state_for(&text);
-        s.apply_edit(&mut text, (0, 0), "→", 0.0);
-        assert_eq!(text, "→日本語\nテスト");
+        s.apply_edit(&mut text, (0, 0), "â†’", 0.0);
+        assert_eq!(text, "â†’æ—¥æœ¬èªž\nãƒ†ã‚¹ãƒˆ");
         let end = s.total_chars;
         s.apply_edit(&mut text, (end, end + 50), "!", 1.5);
         assert!(text.ends_with('!'));
@@ -972,23 +1260,19 @@ mod tests {
         let mut s = state_for(&text);
         let mut changed = false;
         // backspace at 0: no-op
-        handle_key(&mut s, &mut text, Key::Backspace, Modifiers::NONE, 10, 0.0, &mut changed);
+        handle_key(&mut s, &mut text, Key::Backspace, Modifiers::NONE, 0.0, &mut changed);
         assert_eq!(text, "ab\ncd");
-        // arrows past ends clamp
+        // delete at end: no-op
+        s.set_selection(5, 5);
+        handle_key(&mut s, &mut text, Key::Delete, Modifiers::NONE, 0.0, &mut changed);
+        assert_eq!(text, "ab\ncd");
+        // left at 0 stays; right at end stays
         s.set_selection(0, 0);
-        handle_key(&mut s, &mut text, Key::ArrowUp, Modifiers::NONE, 10, 0.0, &mut changed);
+        handle_key(&mut s, &mut text, Key::ArrowLeft, Modifiers::NONE, 0.0, &mut changed);
         assert_eq!(s.cursor, 0);
         s.set_selection(5, 5);
-        handle_key(&mut s, &mut text, Key::ArrowDown, Modifiers::NONE, 10, 0.0, &mut changed);
+        handle_key(&mut s, &mut text, Key::ArrowRight, Modifiers::NONE, 0.0, &mut changed);
         assert_eq!(s.cursor, 5);
-        // delete at end: no-op
-        handle_key(&mut s, &mut text, Key::Delete, Modifiers::NONE, 10, 0.0, &mut changed);
-        assert_eq!(text, "ab\ncd");
-        // page up/down beyond bounds clamp
-        handle_key(&mut s, &mut text, Key::PageUp, Modifiers::NONE, 100, 0.0, &mut changed);
-        assert_eq!(s.line_of_char(s.cursor), 0);
-        handle_key(&mut s, &mut text, Key::PageDown, Modifiers::NONE, 100, 0.0, &mut changed);
-        assert_eq!(s.line_of_char(s.cursor), 1);
     }
 
     #[test]
@@ -997,11 +1281,38 @@ mod tests {
         let mut s = state_for(&text);
         s.set_selection(2, 8);
         let mut changed = false;
-        handle_key(&mut s, &mut text, Key::Enter, Modifiers::NONE, 10, 0.0, &mut changed);
+        handle_key(&mut s, &mut text, Key::Enter, Modifiers::NONE, 0.0, &mut changed);
         assert_eq!(text, "he\nrld");
         assert!(changed);
         s.undo(&mut text);
         assert_eq!(text, "hello\nworld");
+    }
+
+    #[test]
+    fn wrap_cache_splice_stays_aligned() {
+        let mut text = String::from("one\ntwo\nthree");
+        let mut s = state_for(&text);
+        // simulate a built wrap cache
+        s.wrap_rows = vec![1, 1, 1];
+        s.wrap_valid = true;
+        // replace "two" with two lines -> line count 3 -> 4
+        s.apply_edit(&mut text, (4, 7), "2a\n2b", 0.0);
+        assert_eq!(text, "one\n2a\n2b\nthree");
+        assert_eq!(s.line_count(), 4);
+        assert!(s.wrap_valid);
+        assert_eq!(s.wrap_rows.len(), 4);
+        assert_eq!(s.wrap_rows[0], 1); // untouched line kept
+        assert_eq!(s.wrap_rows[1], u32::MAX); // edited region marked
+        assert_eq!(s.wrap_rows[2], u32::MAX);
+        assert_eq!(s.wrap_rows[3], 1); // shifted line kept
+
+        // deleting a newline shrinks the cache
+        s.wrap_rows = vec![1, 1, 1, 1];
+        s.apply_edit(&mut text, (3, 4), "", 5.0); // remove first '\n'
+        assert_eq!(s.line_count(), 3);
+        assert_eq!(s.wrap_rows.len(), 3);
+        assert_eq!(s.wrap_rows[0], u32::MAX);
+        assert_eq!(s.wrap_rows[1], 1);
     }
 }
 
