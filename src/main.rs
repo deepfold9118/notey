@@ -7,6 +7,7 @@ mod ipc;
 mod plugins;
 mod session;
 mod spell;
+mod syntax;
 mod theme;
 
 use std::path::PathBuf;

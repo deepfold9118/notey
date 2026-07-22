@@ -27,6 +27,7 @@ pub enum HostAction {
     CloseBuffer(u64),
     Alert(String, String),
     SetClipboard(String),
+    SetLanguage(Option<String>),
 }
 
 #[derive(Clone)]
@@ -46,6 +47,7 @@ pub struct ScriptCtx {
     pub sel_dirty: bool,
     pub buffers: Vec<BufInfo>,
     pub active_id: u64,
+    pub language: Option<String>,
     pub config_dir: String,
     pub actions: Vec<HostAction>,
     pub status: Option<String>,
@@ -303,6 +305,7 @@ impl ScriptCtx {
             sel_dirty: self.sel_dirty,
             buffers: self.buffers.clone(),
             active_id: self.active_id,
+            language: self.language.clone(),
             config_dir: self.config_dir.clone(),
             actions: Vec::new(), // actions can't be cloned; drop them
             status: self.status.clone(),
@@ -516,6 +519,22 @@ fn api_engine(_ctx: Ctx) -> Engine {
         let n = c.text.chars().count();
         c.sel = (0, n);
         c.sel_dirty = true;
+    });
+    engine.register_fn("language", |e: &mut EditorApi| -> ImmutableString {
+        e.ctx
+            .borrow()
+            .language
+            .clone()
+            .unwrap_or_else(|| "Plain Text".to_string())
+            .into()
+    });
+    engine.register_fn("set_language", |e: &mut EditorApi, name: ImmutableString| {
+        let lang = if name.is_empty() || name.eq_ignore_ascii_case("plain text") {
+            None
+        } else {
+            Some(name.to_string())
+        };
+        e.ctx.borrow_mut().actions.push(HostAction::SetLanguage(lang));
     });
 
     // ---- buffers ----

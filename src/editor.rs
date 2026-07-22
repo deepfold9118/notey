@@ -89,6 +89,8 @@ pub struct EditorState {
     /// Origin of an in-progress Alt+drag column selection, in content
     /// coordinates relative to the text origin.
     column_drag_origin: Option<(f32, f32)>,
+    /// Syntax highlight cache; None = plain text.
+    pub hl: Option<crate::syntax::HlCache>,
 }
 
 impl EditorState {
@@ -164,6 +166,9 @@ impl EditorState {
             return;
         }
         self.rebuild_index(text);
+        if let Some(hl) = &mut self.hl {
+            hl.invalidate_all();
+        }
         self.revision_seen = revision;
         self.indexed_once = true;
         self.clamp();
@@ -293,6 +298,7 @@ impl EditorState {
 
         let sel_before = self.snapshot();
         let ins_chars = insert.chars().count();
+        let group_first_line = self.line_of_char(filtered[0].0);
 
         // apply descending so original-space offsets stay valid
         let mut edits: Vec<SingleEdit> = Vec::with_capacity(filtered.len());
@@ -330,6 +336,10 @@ impl EditorState {
         }
         edits.reverse(); // store ascending
         self.rebuild_index(text);
+        let n_lines = self.line_count();
+        if let Some(hl) = &mut self.hl {
+            hl.invalidate_from(group_first_line, n_lines);
+        }
 
         // final caret positions, ascending with cumulative shift
         let mut shift: i64 = 0;
@@ -402,6 +412,9 @@ impl EditorState {
         }
         self.wrap_valid = false;
         self.rebuild_index(text);
+        if let Some(hl) = &mut self.hl {
+            hl.invalidate_all();
+        }
         self.restore_snapshot(&op.sel_before);
         self.scroll_to_cursor = true;
         self.redo.push(op);
@@ -418,6 +431,9 @@ impl EditorState {
         }
         self.wrap_valid = false;
         self.rebuild_index(text);
+        if let Some(hl) = &mut self.hl {
+            hl.invalidate_all();
+        }
         self.restore_snapshot(&op.sel_after);
         self.scroll_to_cursor = true;
         self.undo.push(op);
@@ -428,6 +444,9 @@ impl EditorState {
     pub fn note_external_change(&mut self) {
         self.indexed_once = false;
         self.wrap_valid = false;
+        if let Some(hl) = &mut self.hl {
+            hl.invalidate_all();
+        }
         self.undo.clear();
         self.redo.clear();
     }
@@ -487,6 +506,7 @@ pub struct EditorTheme {
     pub current_line: Color32,
     pub misspell: Color32,
     pub gutter_bg: Color32,
+    pub dark: bool,
 }
 
 pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool) -> EditorTheme {
@@ -504,6 +524,7 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
         },
         misspell: Color32::from_rgb(232, 82, 82),
         gutter_bg: p.editor,
+        dark,
     }
 }
 
@@ -808,6 +829,18 @@ pub fn show(
             let first = state.line_at_visual_row(v_first);
             let last = (state.line_at_visual_row(v_last.saturating_sub(1)) + 1).min(n_lines);
 
+            // syntax highlight: parse forward (cached) up to the visible bottom
+            if let Some(mut hl) = state.hl.take() {
+                hl.ensure(last, n_lines, th.dark, |i| {
+                    let (s, _) = state.line_slice(text, i);
+                    let mut l = String::with_capacity(s.len() + 1);
+                    l.push_str(s);
+                    l.push('\n');
+                    l
+                });
+                state.hl = Some(hl);
+            }
+
             for li in first..last {
                 let y = rect.top() + state.wrap_prefix[li] as f32 * row_h;
                 let line_rows = state.wrap_rows[li].max(1);
@@ -828,7 +861,12 @@ pub fn show(
                     );
                 }
 
-                let galley = line_galley(ui, slice, th, spell, wrap_w);
+                let hl_spans: Option<Vec<(Color32, u32)>> = state
+                    .hl
+                    .as_ref()
+                    .and_then(|h| h.spans.get(li).cloned().flatten());
+                let galley =
+                    line_galley_colored(ui, slice, th, spell, wrap_w, hl_spans.as_deref());
 
                 // selection highlights (may span wrapped rows; one per cursor)
                 for &(sel_a, sel_b) in &sel_ranges {
@@ -1404,24 +1442,35 @@ fn next_word(state: &EditorState, text: &str, from: usize) -> usize {
     start + i
 }
 
-/// Layout one line, with optional spellcheck underlines and wrapping.
+/// Layout one line with syntax colors, spell underlines, and wrapping.
 /// `line_height` is pinned to the theme row height so every visual row has
-/// identical geometry (the wrap cache and painters rely on this).
-fn line_galley(
+/// identical geometry (the wrap cache and painters rely on this). Syntax
+/// colors never change glyph metrics, so hit-testing may pass `None` spans.
+fn line_galley_colored(
     ui: &egui::Ui,
     slice: &str,
     th: &EditorTheme,
     spell: Option<&Spell>,
     wrap_w: Option<f32>,
+    hl_spans: Option<&[(Color32, u32)]>,
 ) -> std::sync::Arc<egui::Galley> {
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap_w.unwrap_or(f32::INFINITY);
-    let normal = TextFormat {
+    let base = TextFormat {
         font_id: th.font.clone(),
         color: th.text,
         line_height: Some(th.row_height),
         ..Default::default()
     };
+    if let Some(spans) = hl_spans {
+        let bad_ranges = match spell {
+            Some(sp) => misspelled_byte_ranges(slice, sp),
+            None => Vec::new(),
+        };
+        append_colored(&mut job, slice, spans, &bad_ranges, &base, th);
+        return ui.ctx().fonts_mut(|f| f.layout_job(job));
+    }
+    let normal = base;
     match spell {
         Some(sp) => {
             let bad = TextFormat {
@@ -1433,6 +1482,102 @@ fn line_galley(
         None => job.append(slice, 0.0, normal),
     }
     ui.ctx().fonts_mut(|f| f.layout_job(job))
+}
+
+/// Plain layout used for hit-testing and painting when no syntax is active.
+fn line_galley(
+    ui: &egui::Ui,
+    slice: &str,
+    th: &EditorTheme,
+    spell: Option<&Spell>,
+    wrap_w: Option<f32>,
+) -> std::sync::Arc<egui::Galley> {
+    line_galley_colored(ui, slice, th, spell, wrap_w, None)
+}
+
+/// Byte ranges of misspelled words in the line.
+fn misspelled_byte_ranges(text: &str, sp: &Spell) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut prev: Option<char> = None;
+    let mut iter = text.char_indices().peekable();
+    while let Some((i, c)) = iter.next() {
+        if spell::is_word_char(c) {
+            let start = i;
+            let mut end = i + c.len_utf8();
+            while let Some(&(j, cj)) = iter.peek() {
+                if spell::is_word_char(cj) {
+                    end = j + cj.len_utf8();
+                    iter.next();
+                } else {
+                    break;
+                }
+            }
+            let word = &text[start..end];
+            if spell::checkable(word, prev) && !sp.check(word) {
+                out.push((start, end));
+            }
+            prev = word.chars().last();
+        } else {
+            prev = Some(c);
+        }
+    }
+    out
+}
+
+/// Append `text` split on both syntax-span and misspelling boundaries.
+fn append_colored(
+    job: &mut LayoutJob,
+    text: &str,
+    spans: &[(Color32, u32)],
+    bad_ranges: &[(usize, usize)],
+    base: &TextFormat,
+    th: &EditorTheme,
+) {
+    let len = text.len();
+    let mut pos = 0usize;
+    let mut si = 0usize;
+    let mut span_end = spans.first().map(|s| s.1 as usize).unwrap_or(len);
+    let mut span_color = spans.first().map(|s| s.0).unwrap_or(base.color);
+    let mut bi = 0usize;
+    while pos < len {
+        // advance to the span containing `pos`
+        while pos >= span_end && si + 1 < spans.len() {
+            si += 1;
+            span_end += spans[si].1 as usize;
+            span_color = spans[si].0;
+        }
+        if pos >= span_end {
+            span_end = len; // spans ran short; paint the tail in base color
+            span_color = base.color;
+        }
+        // advance past finished misspell ranges
+        while bi < bad_ranges.len() && bad_ranges[bi].1 <= pos {
+            bi += 1;
+        }
+        let (in_bad, bad_edge) = if bi < bad_ranges.len() {
+            let (ba, bb) = bad_ranges[bi];
+            if pos >= ba {
+                (true, bb)
+            } else {
+                (false, ba)
+            }
+        } else {
+            (false, len)
+        };
+        let next = span_end.min(bad_edge).min(len);
+        if next <= pos {
+            break; // defensive: no progress possible
+        }
+        let mut fmt = TextFormat {
+            color: span_color,
+            ..base.clone()
+        };
+        if in_bad {
+            fmt.underline = egui::Stroke::new(1.5, th.misspell);
+        }
+        job.append(&text[pos..next], 0.0, fmt);
+        pos = next;
+    }
 }
 
 #[cfg(test)]

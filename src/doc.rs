@@ -48,6 +48,8 @@ pub struct Document {
     /// Bumped whenever `text` is mutated outside the preview editor so it
     /// can rebuild its line index.
     pub revision: u64,
+    /// Syntax name for highlighting; None = plain text.
+    pub language: Option<String>,
 }
 
 impl Document {
@@ -61,6 +63,7 @@ impl Document {
             line_ending: LineEnding::Crlf,
             untitled_n,
             revision: 0,
+            language: None,
         }
     }
 
@@ -88,6 +91,7 @@ impl Document {
             line_ending,
             untitled_n: 0,
             revision: 0,
+            language: crate::syntax::detect(path),
         })
     }
 

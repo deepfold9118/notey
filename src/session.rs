@@ -15,6 +15,9 @@ pub struct SessionTab {
     /// Unsaved buffer contents. `None` means the tab was saved (reopen from
     /// `path`).
     pub dirty_text: Option<String>,
+    /// Manually chosen syntax (None = auto-detect / plain).
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]

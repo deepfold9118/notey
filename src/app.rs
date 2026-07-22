@@ -92,6 +92,7 @@ pub struct NoteyApp {
     goto_open: bool,
     goto_line: String,
     about_open: bool,
+    lang_filter: String,
 
     pending_events: Vec<egui::Event>,
     focus_editor: bool,
@@ -158,6 +159,7 @@ impl NoteyApp {
             goto_open: false,
             goto_line: String::new(),
             about_open: false,
+            lang_filter: String::new(),
             pending_events: Vec::new(),
             focus_editor: true,
             close_confirm: None,
@@ -254,7 +256,7 @@ impl NoteyApp {
         for tab in session.tabs {
             let id = self.next_doc_id;
             self.next_doc_id += 1;
-            let doc = match (&tab.path, tab.dirty_text) {
+            let mut doc = match (&tab.path, tab.dirty_text) {
                 (Some(path), Some(text)) => Document::restore_file(id, path, text),
                 (Some(path), None) => match Document::open(id, path) {
                     Ok(doc) => doc,
@@ -267,6 +269,9 @@ impl NoteyApp {
                 }
                 (None, None) => continue,
             };
+            if tab.language.is_some() {
+                doc.language = tab.language.clone();
+            }
             self.docs.push(doc);
         }
         if !self.docs.is_empty() {
@@ -293,6 +298,7 @@ impl NoteyApp {
                 } else {
                     None
                 },
+                language: d.language.clone(),
             });
         }
         Session { active, tabs }
@@ -498,6 +504,7 @@ impl NoteyApp {
                 })
                 .collect(),
             active_id: doc.id,
+            language: doc.language.clone(),
             config_dir: PluginHost::scripts_dir()
                 .and_then(|d| d.parent().map(|p| p.display().to_string()))
                 .unwrap_or_default(),
@@ -539,6 +546,22 @@ impl NoteyApp {
                 HostAction::SetClipboard(s) => {
                     if let Ok(mut c) = arboard::Clipboard::new() {
                         let _ = c.set_text(s);
+                    }
+                }
+                HostAction::SetLanguage(lang) => {
+                    let valid = match &lang {
+                        None => Some(None),
+                        Some(name) => crate::syntax::global()
+                            .set
+                            .find_syntax_by_name(name)
+                            .map(|sr| Some(sr.name.clone())),
+                    };
+                    match valid {
+                        Some(l) => self.docs[self.active].language = l,
+                        None => self.flash(format!(
+                            "Unknown language: {}",
+                            lang.unwrap_or_default()
+                        )),
                     }
                 }
             }
@@ -1537,6 +1560,20 @@ impl NoteyApp {
         let request_focus = self.focus_editor;
         self.focus_editor = false;
 
+        // keep the highlight cache in step with the document's language
+        {
+            let lang = self.docs[self.active].language.clone();
+            let id = self.docs[self.active].id;
+            let state = self.editor_states.entry(id).or_default();
+            match (&lang, &state.hl) {
+                (None, Some(_)) => state.hl = None,
+                (Some(l), hl) if hl.as_ref().map(|h| &h.syntax != l).unwrap_or(true) => {
+                    state.hl = Some(crate::syntax::HlCache::new(l.clone()));
+                }
+                _ => {}
+            }
+        }
+
         let doc = &mut self.docs[self.active];
         let state = self.editor_states.entry(doc.id).or_default();
         let spell = if spell_on { Some(&self.spell) } else { None };
@@ -1597,6 +1634,7 @@ impl NoteyApp {
         let chars = doc.text.chars().count();
         let cur_enc = doc.encoding;
         let cur_le = doc.line_ending;
+        let cur_lang = doc.language.clone();
         let zoom = self.zoom;
         ui.horizontal(|ui| {
             if let Some((msg, _)) = &self.status_msg {
@@ -1606,6 +1644,7 @@ impl NoteyApp {
             }
             let mut new_enc: Option<Encoding> = None;
             let mut new_le: Option<LineEnding> = None;
+            let mut new_lang: Option<Option<String>> = None;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(cur_enc.label(), |ui| {
                     for enc in [
@@ -1635,6 +1674,44 @@ impl NoteyApp {
                 .response
                 .on_hover_text("Line endings used when saving");
                 ui.separator();
+                let lang_label = cur_lang.clone().unwrap_or_else(|| "Plain Text".into());
+                ui.menu_button(lang_label, |ui| {
+                    ui.set_min_width(220.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.lang_filter)
+                            .hint_text("Filter languages…"),
+                    );
+                    ui.separator();
+                    let filter = self.lang_filter.to_lowercase();
+                    egui::ScrollArea::vertical()
+                        .max_height(320.0)
+                        .show(ui, |ui| {
+                            if filter.is_empty() || "plain text".contains(&filter) {
+                                if ui
+                                    .selectable_label(cur_lang.is_none(), "Plain Text")
+                                    .clicked()
+                                {
+                                    new_lang = Some(None);
+                                    ui.close();
+                                }
+                            }
+                            for name in &crate::syntax::global().names {
+                                if !filter.is_empty()
+                                    && !name.to_lowercase().contains(&filter)
+                                {
+                                    continue;
+                                }
+                                let selected = cur_lang.as_deref() == Some(name);
+                                if ui.selectable_label(selected, name).clicked() {
+                                    new_lang = Some(Some(name.clone()));
+                                    ui.close();
+                                }
+                            }
+                        });
+                })
+                .response
+                .on_hover_text("Syntax highlighting (preview editor)");
+                ui.separator();
                 ui.label(format!("{zoom:.0}%"));
                 ui.separator();
                 ui.label(format!("{chars} characters"));
@@ -1644,6 +1721,10 @@ impl NoteyApp {
             }
             if let Some(le) = new_le {
                 self.docs[self.active].line_ending = le;
+            }
+            if let Some(lang) = new_lang {
+                self.docs[self.active].language = lang;
+                self.lang_filter.clear();
             }
         });
     }
