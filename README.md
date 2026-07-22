@@ -59,6 +59,11 @@ starts. Closing an individual tab still prompts to save. Secondary
   endings (CRLF / LF) and encoding (UTF-8, UTF-8 BOM, UTF-16 LE/BE, ANSI)
   selectors for the current file
 - Encoding and line endings are detected on open and preserved on save
+- **File watching**: open files are polled for on-disk changes — a prompt
+  offers Reload / Keep when another program modified the file (deletions
+  are flagged in the status bar)
+- **Recent Files** submenu in the File menu (last 10, persisted)
+- **Autosave** (Preferences): periodically saves modified file-backed tabs
 
 ## Preview editor
 

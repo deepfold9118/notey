@@ -114,6 +114,13 @@ pub struct NoteyApp {
     fif_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     fif_panel: bool,
 
+    recent_files: Vec<PathBuf>,
+    last_disk_check: f64,
+    reload_confirm: Option<u64>,
+    autosave: bool,
+    autosave_secs: f32,
+    last_autosave: f64,
+
     pending_events: Vec<egui::Event>,
     focus_editor: bool,
     close_confirm: Option<PendingClose>,
@@ -195,6 +202,12 @@ impl NoteyApp {
             fif_rx: None,
             fif_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             fif_panel: false,
+            recent_files: Vec::new(),
+            last_disk_check: 0.0,
+            reload_confirm: None,
+            autosave: false,
+            autosave_secs: 30.0,
+            last_autosave: 0.0,
             pending_events: Vec::new(),
             focus_editor: true,
             close_confirm: None,
@@ -243,6 +256,16 @@ impl NoteyApp {
             if let Some(v) = storage.get_string("editor_font") {
                 if !v.is_empty() {
                     app.editor_font = v;
+                }
+            }
+            app.autosave = get_bool("autosave", false);
+            if let Some(v) = storage.get_string("autosave_secs").and_then(|v| v.parse().ok())
+            {
+                app.autosave_secs = v;
+            }
+            if let Some(v) = storage.get_string("recent_files") {
+                if let Ok(list) = serde_json::from_str::<Vec<String>>(&v) {
+                    app.recent_files = list.into_iter().map(PathBuf::from).collect();
                 }
             }
         }
@@ -383,6 +406,13 @@ impl NoteyApp {
         }
     }
 
+    fn note_recent(&mut self, path: &std::path::Path) {
+        let p = clean_path(path.to_path_buf());
+        self.recent_files.retain(|r| r != &p);
+        self.recent_files.insert(0, p);
+        self.recent_files.truncate(10);
+    }
+
     /// Open `path` as a tab (or focus its tab if already open).
     fn open_path(&mut self, path: &std::path::Path) {
         let path = clean_path(path.to_path_buf());
@@ -393,6 +423,7 @@ impl NoteyApp {
         {
             self.active = i;
             self.focus_editor = true;
+            self.note_recent(&path);
             return;
         }
         let id = self.next_doc_id;
@@ -409,6 +440,7 @@ impl NoteyApp {
                 self.docs.push(doc);
                 self.active = self.docs.len() - 1;
                 self.focus_editor = true;
+                self.note_recent(&path);
                 self.queued_plugin_events.push((
                     "buffer_opened".to_string(),
                     Some(path.display().to_string()),
@@ -452,7 +484,8 @@ impl NoteyApp {
             .set_file_name(format!("{suggested}.txt"))
             .save_file();
         if let Some(path) = picked {
-            self.docs[idx].path = Some(path);
+            self.docs[idx].path = Some(path.clone());
+            self.note_recent(&path);
             self.save_doc(ctx, idx)
         } else {
             false
@@ -1135,6 +1168,37 @@ impl NoteyApp {
                 if menu_item(ui, "Open…", "Ctrl+O") {
                     self.open_dialog();
                 }
+                ui.menu_button("Open Recent", |ui| {
+                    ui.set_min_width(180.0);
+                    if self.recent_files.is_empty() {
+                        ui.label(egui::RichText::new("(empty)").weak());
+                    }
+                    let mut open_req: Option<PathBuf> = None;
+                    for p in &self.recent_files {
+                        let name = p
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| p.display().to_string());
+                        if ui
+                            .button(name)
+                            .on_hover_text(p.display().to_string())
+                            .clicked()
+                        {
+                            open_req = Some(p.clone());
+                            ui.close();
+                        }
+                    }
+                    if !self.recent_files.is_empty() {
+                        ui.separator();
+                        if ui.button("Clear Recently Opened").clicked() {
+                            self.recent_files.clear();
+                            ui.close();
+                        }
+                    }
+                    if let Some(p) = open_req {
+                        self.open_path(&p);
+                    }
+                });
                 if menu_item(ui, "Save", "Ctrl+S") {
                     self.save_doc(ctx, self.active);
                 }
@@ -2171,6 +2235,20 @@ impl NoteyApp {
                         ui.checkbox(&mut self.word_wrap, "Wrap long lines");
                         ui.end_row();
 
+                        ui.label("Autosave:");
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.autosave, "Save files every");
+                            ui.add_enabled(
+                                self.autosave,
+                                egui::DragValue::new(&mut self.autosave_secs)
+                                    .range(5.0..=600.0)
+                                    .speed(1.0)
+                                    .fixed_decimals(0)
+                                    .suffix(" s"),
+                            );
+                        });
+                        ui.end_row();
+
                         ui.label("Menu bar:");
                         ui.checkbox(&mut self.show_menu, "Always show menu bar")
                             .on_hover_text(
@@ -2199,6 +2277,8 @@ impl NoteyApp {
                         self.show_line_numbers = false;
                         self.word_wrap = true;
                         self.show_menu = false;
+                        self.autosave = false;
+                        self.autosave_secs = 30.0;
                         if self.editor_font != "Consolas" {
                             self.editor_font = "Consolas".to_string();
                             font_changed = fonts
@@ -2261,6 +2341,64 @@ impl NoteyApp {
                 ui.label("Built with egui / eframe and spellbook (Hunspell).");
             });
         self.about_open = open;
+    }
+
+    fn reload_modal(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.reload_confirm else { return };
+        let Some(idx) = self.docs.iter().position(|d| d.id == id) else {
+            self.reload_confirm = None;
+            return;
+        };
+        let title = self.docs[idx].title();
+        let modified = self.docs[idx].modified();
+        let mut action: Option<bool> = None; // Some(true) = reload
+        egui::Modal::new(egui::Id::new("reload_confirm")).show(ctx, |ui| {
+            ui.set_min_width(340.0);
+            ui.heading("File changed on disk");
+            ui.add_space(4.0);
+            ui.label(format!(
+                "\"{title}\" was modified by another program."
+            ));
+            if modified {
+                ui.colored_label(
+                    Color32::from_rgb(232, 82, 82),
+                    "Reloading will discard your unsaved changes in this tab.",
+                );
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Reload").clicked() {
+                    action = Some(true);
+                }
+                if ui.button("Keep This Version").clicked() {
+                    action = Some(false);
+                }
+            });
+        });
+        match action {
+            Some(true) => {
+                match self.docs[idx].reload() {
+                    Ok(()) => {
+                        let doc_id = self.docs[idx].id;
+                        if let Some(state) = self.editor_states.get_mut(&doc_id) {
+                            state.note_external_change();
+                        }
+                        self.flash(format!("Reloaded {title}"));
+                    }
+                    Err(e) => self.flash(format!("Reload failed: {e}")),
+                }
+                self.reload_confirm = None;
+            }
+            Some(false) => {
+                // refresh the known mtime so we don't re-prompt for this write
+                if let Some(path) = self.docs[idx].path.clone() {
+                    self.docs[idx].disk_mtime =
+                        std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+                }
+                self.reload_confirm = None;
+            }
+            None => {}
+        }
     }
 
     fn close_confirm_modal(&mut self, ctx: &egui::Context) {
@@ -2417,6 +2555,50 @@ impl eframe::App for NoteyApp {
             self.run_plugin_command(ctx, i, &id);
         }
 
+        // ---- disk change detection + autosave ----
+        let now_t = ctx.input(|i| i.time);
+        if now_t - self.last_disk_check > 3.0 {
+            self.last_disk_check = now_t;
+            if self.reload_confirm.is_none() {
+                let mut deleted: Option<String> = None;
+                for doc in &mut self.docs {
+                    let Some(path) = doc.path.clone() else { continue };
+                    let Some(known) = doc.disk_mtime else { continue };
+                    match std::fs::metadata(&path).and_then(|m| m.modified()) {
+                        Ok(m) if m > known => {
+                            self.reload_confirm = Some(doc.id);
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => {
+                            doc.disk_mtime = None;
+                            deleted = Some(doc.title());
+                        }
+                    }
+                }
+                if let Some(t) = deleted {
+                    self.flash(format!("File on disk was deleted: {t}"));
+                }
+            }
+        }
+        if self.autosave {
+            if now_t - self.last_autosave > self.autosave_secs.max(5.0) as f64 {
+                self.last_autosave = now_t;
+                let mut n = 0usize;
+                for doc in &mut self.docs {
+                    if doc.path.is_some() && doc.modified() && doc.save().is_ok() {
+                        n += 1;
+                    }
+                }
+                if n > 0 {
+                    self.flash(format!("Autosaved {n} file(s)"));
+                }
+            }
+        }
+        if self.autosave || self.docs.iter().any(|d| d.disk_mtime.is_some()) {
+            ctx.request_repaint_after(std::time::Duration::from_secs(3));
+        }
+
         // drain incoming Find-in-Files results
         if let Some(rx) = &self.fif_rx {
             let mut disconnected = false;
@@ -2490,6 +2672,7 @@ impl eframe::App for NoteyApp {
         self.about_window(ctx);
         self.fif_window(ctx);
         self.plugin_alert_windows(ctx);
+        self.reload_modal(ctx);
         self.close_confirm_modal(ctx);
 
         // status flash timeout
@@ -2530,6 +2713,17 @@ impl eframe::App for NoteyApp {
         storage.set_string("line_height", self.line_height.to_string());
         storage.set_string("tab_size", self.tab_size.to_string());
         storage.set_string("editor_font", self.editor_font.clone());
+        storage.set_string("autosave", b(self.autosave));
+        storage.set_string("autosave_secs", self.autosave_secs.to_string());
+        let recent: Vec<String> = self
+            .recent_files
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        storage.set_string(
+            "recent_files",
+            serde_json::to_string(&recent).unwrap_or_default(),
+        );
         // periodic + on-exit session snapshot (crash-safe unsaved tabs)
         if self.is_primary {
             session::save(&self.session_snapshot());

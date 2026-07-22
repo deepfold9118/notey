@@ -50,6 +50,9 @@ pub struct Document {
     pub revision: u64,
     /// Syntax name for highlighting; None = plain text.
     pub language: Option<String>,
+    /// Last known on-disk modification time (None for untitled docs or
+    /// after the file disappeared).
+    pub disk_mtime: Option<std::time::SystemTime>,
 }
 
 impl Document {
@@ -64,6 +67,7 @@ impl Document {
             untitled_n,
             revision: 0,
             language: None,
+            disk_mtime: None,
         }
     }
 
@@ -92,7 +96,26 @@ impl Document {
             untitled_n: 0,
             revision: 0,
             language: crate::syntax::detect(path),
+            disk_mtime: std::fs::metadata(path).and_then(|m| m.modified()).ok(),
         })
+    }
+
+    /// Re-read the file from disk, discarding the in-memory buffer.
+    pub fn reload(&mut self) -> io::Result<()> {
+        let path = self
+            .path
+            .clone()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no file path"))?;
+        let language = self.language.clone();
+        let fresh = Self::open(self.id, &path)?;
+        self.text = fresh.text;
+        self.saved_text = fresh.saved_text;
+        self.encoding = fresh.encoding;
+        self.line_ending = fresh.line_ending;
+        self.disk_mtime = fresh.disk_mtime;
+        self.language = language; // keep a manual language choice
+        self.touch();
+        Ok(())
     }
 
     /// Recreate an untitled tab from session data (always marked modified).
@@ -141,6 +164,7 @@ impl Document {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no file path"))?;
         std::fs::write(&path, self.encode())?;
         self.saved_text = self.text.clone();
+        self.disk_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
         Ok(())
     }
 
