@@ -12,6 +12,7 @@ use crate::doc::{Document, Encoding, LineEnding};
 use crate::editor::{self, EditorState};
 use crate::ipc::{clean_path, Inbox};
 use crate::plugins::{self, HostAction, PluginHost, ScriptCtx};
+use crate::search;
 use crate::session::{self, Session, SessionTab};
 use crate::spell::{self, Spell};
 use crate::theme;
@@ -27,6 +28,8 @@ const SC_SAVE_AS: KeyboardShortcut =
 const SC_CLOSE_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::W);
 const SC_PRINT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::P);
 const SC_FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::F);
+const SC_FIND_FILES: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::SHIFT), Key::F);
 const SC_REPLACE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::H);
 const SC_GOTO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::G);
 const SC_FIND_NEXT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F3);
@@ -87,12 +90,29 @@ pub struct NoteyApp {
     replace_text: String,
     match_case: bool,
     wrap_around: bool,
+    use_regex: bool,
+    regex_error: Option<String>,
     focus_find: bool,
+    search_marks: Vec<(usize, usize)>,
+    marks_doc: u64,
 
     goto_open: bool,
     goto_line: String,
     about_open: bool,
     lang_filter: String,
+
+    // Find in Files
+    fif_open: bool,
+    fif_pattern: String,
+    fif_dir: String,
+    fif_filter: String,
+    fif_regex: bool,
+    fif_case: bool,
+    fif_error: Option<String>,
+    fif_results: Vec<search::GrepMatch>,
+    fif_rx: Option<std::sync::mpsc::Receiver<search::GrepMatch>>,
+    fif_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    fif_panel: bool,
 
     pending_events: Vec<egui::Event>,
     focus_editor: bool,
@@ -155,11 +175,26 @@ impl NoteyApp {
             replace_text: String::new(),
             match_case: false,
             wrap_around: true,
+            use_regex: false,
+            regex_error: None,
             focus_find: false,
+            search_marks: Vec::new(),
+            marks_doc: 0,
             goto_open: false,
             goto_line: String::new(),
             about_open: false,
             lang_filter: String::new(),
+            fif_open: false,
+            fif_pattern: String::new(),
+            fif_dir: String::new(),
+            fif_filter: String::new(),
+            fif_regex: false,
+            fif_case: false,
+            fif_error: None,
+            fif_results: Vec::new(),
+            fif_rx: None,
+            fif_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fif_panel: false,
             pending_events: Vec::new(),
             focus_editor: true,
             close_confirm: None,
@@ -662,14 +697,33 @@ impl NoteyApp {
 
     // ---------- find / replace ----------
 
+    /// Compile the Find pattern, surfacing errors in the Find window.
+    fn compiled_pattern(&mut self) -> Option<fancy_regex::Regex> {
+        let opts = search::SearchOpts {
+            regex: self.use_regex,
+            match_case: self.match_case,
+        };
+        match search::compile(&self.find_text, opts) {
+            Ok(re) => {
+                self.regex_error = None;
+                Some(re)
+            }
+            Err(e) => {
+                self.regex_error = Some(e);
+                None
+            }
+        }
+    }
+
     fn find_next(&mut self, ctx: &egui::Context, backwards: bool) {
         if self.find_text.is_empty() {
             return;
         }
+        let Some(re) = self.compiled_pattern() else { return };
         let text = self.docs[self.active].text.clone();
         let (sel_start, sel_end) = self.cursor_range(ctx).unwrap_or((0, 0));
         let from = if backwards { sel_start } else { sel_end };
-        match find_in(&text, &self.find_text, from, self.match_case, backwards, self.wrap_around) {
+        match search::find_next(&text, &re, from, backwards, self.wrap_around) {
             Some((a, b)) => self.set_cursor(ctx, a, b),
             None => self.flash(format!("Cannot find \"{}\"", self.find_text)),
         }
@@ -679,19 +733,20 @@ impl NoteyApp {
         if self.find_text.is_empty() {
             return;
         }
+        let Some(re) = self.compiled_pattern() else { return };
         if let Some((a, b)) = self.cursor_range(ctx) {
             if a != b {
-                let text = &self.docs[self.active].text;
-                let sb = char_to_byte(text, a);
-                let eb = char_to_byte(text, b);
-                let selected = &text[sb..eb];
-                let matches = if self.match_case {
-                    selected == self.find_text
-                } else {
-                    selected.to_lowercase() == self.find_text.to_lowercase()
-                };
-                if matches {
-                    let replacement = self.replace_text.clone();
+                let text = self.docs[self.active].text.clone();
+                // selection must be exactly one match of the pattern
+                if search::find_next(&text, &re, a, false, false) == Some((a, b)) {
+                    let sb = char_to_byte(&text, a);
+                    let eb = char_to_byte(&text, b);
+                    let replacement = search::expand_one(
+                        &text[sb..eb],
+                        &re,
+                        &self.replace_text,
+                        self.use_regex,
+                    );
                     self.edit_text(ctx, (a, b), &replacement);
                 }
             }
@@ -703,57 +758,222 @@ impl NoteyApp {
         if self.find_text.is_empty() {
             return;
         }
+        let Some(re) = self.compiled_pattern() else { return };
         let text = self.docs[self.active].text.clone();
-        let mut out = String::with_capacity(text.len());
-        let mut count = 0usize;
-        let mut pos = 0usize; // char position
-        loop {
-            match find_in(&text, &self.find_text, pos, self.match_case, false, false) {
-                Some((a, b)) => {
-                    let sb = char_to_byte(&text, pos);
-                    let ab = char_to_byte(&text, a);
-                    let bb = char_to_byte(&text, b);
-                    out.push_str(&text[sb..ab]);
-                    out.push_str(&self.replace_text);
-                    count += 1;
-                    pos = b;
-                    let _ = bb;
-                }
-                None => {
-                    let sb = char_to_byte(&text, pos);
-                    out.push_str(&text[sb..]);
-                    break;
-                }
-            }
-        }
+        let (out, count) = search::replace_all(&text, &re, &self.replace_text, self.use_regex);
         if count > 0 {
-            let old_n = self.docs[self.active].text.chars().count();
+            let old_n = text.chars().count();
             self.edit_text(ctx, (0, old_n), &out);
             self.set_cursor(ctx, 0, 0);
         }
         self.flash(format!("Replaced {count} occurrence(s)"));
     }
 
-    fn goto_line(&mut self, ctx: &egui::Context) {
-        if let Ok(n) = self.goto_line.trim().parse::<usize>() {
-            let text = self.docs[self.active].text.clone();
-            let mut line = 1usize;
-            if n <= 1 {
-                self.set_cursor(ctx, 0, 0);
-                self.goto_open = false;
-                return;
-            }
-            for (i, ch) in text.chars().enumerate() {
-                if ch == '\n' {
-                    line += 1;
-                    if line == n {
-                        self.set_cursor(ctx, i + 1, i + 1);
-                        self.goto_open = false;
-                        return;
-                    }
+    fn mark_all(&mut self, _ctx: &egui::Context) {
+        if self.find_text.is_empty() {
+            self.search_marks.clear();
+            return;
+        }
+        let Some(re) = self.compiled_pattern() else { return };
+        let doc = &self.docs[self.active];
+        self.search_marks = search::find_all(&doc.text, &re, 5000);
+        self.marks_doc = doc.id;
+        self.flash(format!("Marked {} match(es)", self.search_marks.len()));
+    }
+
+    fn goto_line_n(&mut self, ctx: &egui::Context, n: usize) {
+        let text = self.docs[self.active].text.clone();
+        if n <= 1 {
+            self.set_cursor(ctx, 0, 0);
+            return;
+        }
+        let mut line = 1usize;
+        for (i, ch) in text.chars().enumerate() {
+            if ch == '\n' {
+                line += 1;
+                if line == n {
+                    self.set_cursor(ctx, i + 1, i + 1);
+                    return;
                 }
             }
-            self.flash(format!("Line {n} is past the end of the file"));
+        }
+        let end = text.chars().count();
+        self.set_cursor(ctx, end, end);
+    }
+
+    fn goto_line(&mut self, ctx: &egui::Context) {
+        if let Ok(n) = self.goto_line.trim().parse::<usize>() {
+            self.goto_line_n(ctx, n);
+            self.goto_open = false;
+        }
+    }
+
+    // ---------- Find in Files ----------
+
+    fn open_fif(&mut self) {
+        if self.fif_dir.trim().is_empty() {
+            if let Some(dir) = self.docs[self.active]
+                .path
+                .as_ref()
+                .and_then(|p| p.parent())
+            {
+                self.fif_dir = dir.display().to_string();
+            }
+        }
+        self.fif_open = true;
+    }
+
+    fn start_find_in_files(&mut self) {
+        self.fif_error = None;
+        if self.fif_pattern.is_empty() {
+            return;
+        }
+        let opts = search::SearchOpts {
+            regex: self.fif_regex,
+            match_case: self.fif_case,
+        };
+        let re = match search::compile(&self.fif_pattern, opts) {
+            Ok(re) => re,
+            Err(e) => {
+                self.fif_error = Some(e);
+                return;
+            }
+        };
+        let root = PathBuf::from(self.fif_dir.trim());
+        if !root.is_dir() {
+            self.fif_error = Some("Folder does not exist".to_string());
+            return;
+        }
+        // cancel any previous run
+        self.fif_cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.fif_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel = self.fif_cancel.clone();
+        let filters = self.fif_filter.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            search::grep_dir(root, re, filters, cancel, tx);
+        });
+        self.fif_rx = Some(rx);
+        self.fif_results.clear();
+        self.fif_panel = true;
+    }
+
+    fn fif_window(&mut self, ctx: &egui::Context) {
+        if !self.fif_open {
+            return;
+        }
+        let mut open = self.fif_open;
+        egui::Window::new("Find in Files")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("fif_grid").num_columns(2).show(ui, |ui| {
+                    ui.label("Find what:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.fif_pattern)
+                            .desired_width(260.0),
+                    );
+                    ui.end_row();
+                    ui.label("In folder:");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.fif_dir)
+                                .desired_width(220.0),
+                        );
+                        if ui.button("…").clicked() {
+                            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                                self.fif_dir = dir.display().to_string();
+                            }
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("Filters:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.fif_filter)
+                            .hint_text("*.rs;*.toml (empty = all)")
+                            .desired_width(260.0),
+                    );
+                    ui.end_row();
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.fif_case, "Match case");
+                    ui.checkbox(&mut self.fif_regex, "Regex");
+                });
+                if let Some(err) = &self.fif_error {
+                    ui.colored_label(Color32::from_rgb(232, 82, 82), err.clone());
+                }
+                ui.separator();
+                if ui.button("Search").clicked() {
+                    self.start_find_in_files();
+                }
+            });
+        self.fif_open = open;
+    }
+
+    fn fif_results_panel(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
+        if !self.fif_panel {
+            return;
+        }
+        let p = theme::palette(self.dark);
+        let mut open_req: Option<(PathBuf, usize)> = None;
+        egui::Panel::bottom(egui::Id::new("fif_results"))
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(p.chrome)
+                    .inner_margin(egui::Margin::symmetric(8, 6)),
+            )
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    let running = self.fif_rx.is_some();
+                    let count = self.fif_results.len();
+                    ui.label(format!(
+                        "{count} result(s) for \"{}\"{}",
+                        self.fif_pattern,
+                        if running { " — searching…" } else { "" }
+                    ));
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui.small_button("Close").clicked() {
+                                self.fif_panel = false;
+                                self.fif_cancel
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            if running && ui.small_button("Stop").clicked() {
+                                self.fif_cancel
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        },
+                    );
+                });
+                ui.separator();
+                let root_dir = PathBuf::from(self.fif_dir.trim());
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for m in &self.fif_results {
+                            let rel = m
+                                .path
+                                .strip_prefix(&root_dir)
+                                .unwrap_or(&m.path)
+                                .display();
+                            let label = format!("{rel}:{}  {}", m.line_no, m.preview);
+                            if ui
+                                .selectable_label(false, egui::RichText::new(label).monospace().size(12.0))
+                                .clicked()
+                            {
+                                open_req = Some((m.path.clone(), m.line_no));
+                            }
+                        }
+                    });
+            });
+        if let Some((path, line)) = open_req {
+            self.open_path(&path);
+            self.goto_line_n(ctx, line);
         }
     }
 
@@ -771,6 +991,7 @@ impl NoteyApp {
         let mut close_tab = false;
         let mut print = false;
         let mut find = false;
+        let mut find_files = false;
         let mut replace = false;
         let mut goto = false;
         let mut find_next = false;
@@ -788,6 +1009,7 @@ impl NoteyApp {
             save = i.consume_shortcut(&SC_SAVE);
             close_tab = i.consume_shortcut(&SC_CLOSE_TAB);
             print = i.consume_shortcut(&SC_PRINT);
+            find_files = i.consume_shortcut(&SC_FIND_FILES);
             find = i.consume_shortcut(&SC_FIND);
             replace = i.consume_shortcut(&SC_REPLACE);
             goto = i.consume_shortcut(&SC_GOTO);
@@ -827,6 +1049,9 @@ impl NoteyApp {
             self.find_open = true;
             self.show_replace = false;
             self.focus_find = true;
+        }
+        if find_files {
+            self.open_fif();
         }
         if replace {
             self.find_open = true;
@@ -966,6 +1191,9 @@ impl NoteyApp {
                     self.find_open = true;
                     self.show_replace = true;
                     self.focus_find = true;
+                }
+                if menu_item(ui, "Find in Files…", "Ctrl+Shift+F") {
+                    self.open_fif();
                 }
                 if menu_item(ui, "Go To…", "Ctrl+G") {
                     self.goto_open = true;
@@ -1574,9 +1802,15 @@ impl NoteyApp {
             }
         }
 
+        let marks_doc = self.marks_doc;
         let doc = &mut self.docs[self.active];
         let state = self.editor_states.entry(doc.id).or_default();
         let spell = if spell_on { Some(&self.spell) } else { None };
+        let marks: &[(usize, usize)] = if marks_doc == doc.id {
+            &self.search_marks
+        } else {
+            &[]
+        };
         let result = editor::show(
             ui,
             editor_id,
@@ -1587,8 +1821,13 @@ impl NoteyApp {
             self.show_line_numbers,
             self.word_wrap,
             spell,
+            marks,
             request_focus,
         );
+        if result.changed {
+            // char offsets are stale after edits
+            self.search_marks.clear();
+        }
         if let Some(word) = result.add_word {
             self.spell.add_word(&word);
         }
@@ -1770,7 +2009,20 @@ impl NoteyApp {
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.match_case, "Match case");
                     ui.checkbox(&mut self.wrap_around, "Wrap around");
+                    if ui
+                        .checkbox(&mut self.use_regex, "Regex")
+                        .on_hover_text("Regular expression (supports lookaround and backreferences; $1 in Replace)")
+                        .changed()
+                    {
+                        self.regex_error = None;
+                    }
                 });
+                if let Some(err) = &self.regex_error {
+                    ui.colored_label(
+                        Color32::from_rgb(232, 82, 82),
+                        format!("Pattern error: {err}"),
+                    );
+                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("Find Next").clicked() {
@@ -1788,6 +2040,16 @@ impl NoteyApp {
                         }
                     } else if ui.small_button("Replace…").clicked() {
                         self.show_replace = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Mark All").clicked() {
+                        self.mark_all(ctx);
+                    }
+                    if !self.search_marks.is_empty() {
+                        if ui.button("Clear Marks").clicked() {
+                            self.search_marks.clear();
+                        }
                     }
                 });
                 if do_next {
@@ -2155,6 +2417,26 @@ impl eframe::App for NoteyApp {
             self.run_plugin_command(ctx, i, &id);
         }
 
+        // drain incoming Find-in-Files results
+        if let Some(rx) = &self.fif_rx {
+            let mut disconnected = false;
+            loop {
+                match rx.try_recv() {
+                    Ok(m) => self.fif_results.push(m),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+            if disconnected {
+                self.fif_rx = None;
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+        }
+
         let p = theme::palette(self.dark);
         egui::Panel::top(egui::Id::new("titlebar"))
             .resizable(false)
@@ -2187,6 +2469,7 @@ impl eframe::App for NoteyApp {
                     self.status_bar(ui);
                 });
         }
+        self.fif_results_panel(root, ctx);
         let central_frame = egui::Frame::new().fill(p.editor).inner_margin(egui::Margin {
             left: 8,
             right: 2,
@@ -2205,6 +2488,7 @@ impl eframe::App for NoteyApp {
         self.goto_window(ctx);
         self.prefs_window(ctx);
         self.about_window(ctx);
+        self.fif_window(ctx);
         self.plugin_alert_windows(ctx);
         self.close_confirm_modal(ctx);
 
@@ -2431,65 +2715,6 @@ fn word_at(text: &str, idx: usize) -> Option<(usize, usize, String)> {
     }
     let word: String = chars[a..b].iter().collect();
     Some((a, b, word))
-}
-
-/// Case-aware substring search over char indices. Returns (start, end) char range.
-fn find_in(
-    text: &str,
-    needle: &str,
-    from_char: usize,
-    match_case: bool,
-    backwards: bool,
-    wrap: bool,
-) -> Option<(usize, usize)> {
-    let fold = |c: char| {
-        if match_case {
-            c
-        } else {
-            c.to_lowercase().next().unwrap_or(c)
-        }
-    };
-    let hay: Vec<char> = text.chars().map(fold).collect();
-    let ned: Vec<char> = needle.chars().map(fold).collect();
-    if ned.is_empty() || hay.len() < ned.len() {
-        return None;
-    }
-    let last_start = hay.len() - ned.len();
-    let matches_at = |i: usize| hay[i..i + ned.len()] == ned[..];
-
-    if backwards {
-        let from = from_char.min(hay.len());
-        let upper = from.checked_sub(ned.len());
-        if let Some(upper) = upper {
-            for i in (0..=upper.min(last_start)).rev() {
-                if matches_at(i) {
-                    return Some((i, i + ned.len()));
-                }
-            }
-        }
-        if wrap {
-            for i in (0..=last_start).rev() {
-                if matches_at(i) {
-                    return Some((i, i + ned.len()));
-                }
-            }
-        }
-    } else {
-        let from = from_char.min(hay.len());
-        for i in from..=last_start {
-            if matches_at(i) {
-                return Some((i, i + ned.len()));
-            }
-        }
-        if wrap {
-            for i in 0..from.min(last_start + 1) {
-                if matches_at(i) {
-                    return Some((i, i + ned.len()));
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Append `text` to `job`, marking misspelled words with the `bad` format.

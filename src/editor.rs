@@ -506,6 +506,7 @@ pub struct EditorTheme {
     pub current_line: Color32,
     pub misspell: Color32,
     pub gutter_bg: Color32,
+    pub mark: Color32,
     pub dark: bool,
 }
 
@@ -524,6 +525,12 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
         },
         misspell: Color32::from_rgb(232, 82, 82),
         gutter_bg: p.editor,
+        mark: Color32::from_rgba_unmultiplied(
+            p.accent.r(),
+            p.accent.g(),
+            p.accent.b(),
+            48,
+        ),
         dark,
     }
 }
@@ -545,6 +552,7 @@ pub fn show(
     show_line_numbers: bool,
     wrap: bool,
     spell: Option<&Spell>,
+    marks: &[(usize, usize)],
     request_focus: bool,
 ) -> ShowResult {
     state.sync(text, revision);
@@ -868,6 +876,29 @@ pub fn show(
                 let galley =
                     line_galley_colored(ui, slice, th, spell, wrap_w, hl_spans.as_deref());
 
+                // search marks (Mark All)
+                for &(ma, mb) in marks {
+                    if mb <= start_chr {
+                        continue;
+                    }
+                    if ma > line_end {
+                        break;
+                    }
+                    let a = ma.max(start_chr) - start_chr;
+                    let b = mb.min(line_end) - start_chr;
+                    paint_char_range(
+                        &painter,
+                        &galley,
+                        a,
+                        b,
+                        y,
+                        text_x,
+                        wrap_w.unwrap_or(f32::INFINITY).min(rect.width()),
+                        row_h,
+                        th.mark,
+                    );
+                }
+
                 // selection highlights (may span wrapped rows; one per cursor)
                 for &(sel_a, sel_b) in &sel_ranges {
                     if !(sel_a < line_end + 1 && sel_b > start_chr) {
@@ -1153,6 +1184,60 @@ fn pos_to_char(
             .index,
     );
     start_chr + col.min(slice.chars().count())
+}
+
+/// Fill the given char-column range of a (possibly wrapped) line galley.
+#[allow(clippy::too_many_arguments)]
+fn paint_char_range(
+    painter: &egui::Painter,
+    galley: &egui::Galley,
+    a: usize,
+    b: usize,
+    y: f32,
+    text_x: f32,
+    right_edge: f32,
+    row_h: f32,
+    color: Color32,
+) {
+    let ra = galley.pos_from_cursor(CCursor::new(a));
+    let rb = galley.pos_from_cursor(CCursor::new(b));
+    if (ra.top() - rb.top()).abs() < 0.5 {
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(text_x + ra.left(), y + ra.top()),
+                egui::pos2(text_x + rb.left().max(ra.left() + 1.0), y + ra.top() + row_h),
+            ),
+            0.0,
+            color,
+        );
+    } else {
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(text_x + ra.left(), y + ra.top()),
+                egui::pos2(text_x + right_edge, y + ra.top() + row_h),
+            ),
+            0.0,
+            color,
+        );
+        if rb.top() - ra.top() > row_h + 0.5 {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(text_x, y + ra.top() + row_h),
+                    egui::pos2(text_x + right_edge, y + rb.top()),
+                ),
+                0.0,
+                color,
+            );
+        }
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(text_x, y + rb.top()),
+                egui::pos2(text_x + rb.left().max(1.0), y + rb.top() + row_h),
+            ),
+            0.0,
+            color,
+        );
+    }
 }
 
 /// Build a rectangular (column) selection between two content-space points:

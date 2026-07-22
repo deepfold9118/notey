@@ -45,6 +45,11 @@ starts. Closing an individual tab still prompts to save. Secondary
 - Edit: Undo, Redo, Cut, Copy, Paste, Delete, Find, Find Next (F3),
   Find Previous (Shift+F3), Replace, Go To line (Ctrl+G), Select All,
   Time/Date (F5), Preferences (Ctrl+,)
+- **Search**: regex find/replace via fancy-regex (lookaround +
+  backreferences, `$1` capture expansion in Replace), Mark All match
+  highlighting (preview editor), and **Find in Files** (Ctrl+Shift+F) —
+  background directory grep respecting .gitignore, with a results panel
+  and click-to-open at the matching line
 - **Preferences** (Edit > Preferences): font picker (all installed system
   fonts, with filter), font size, line height, line numbers, word wrap —
   all persisted between runs

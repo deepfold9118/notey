@@ -371,6 +371,25 @@ struct UiApi {
     ctx: Ctx,
 }
 
+fn parse_search_opts(m: &Map) -> (crate::search::SearchOpts, bool, usize) {
+    let get_bool = |k: &str, d: bool| {
+        m.get(k).and_then(|v| v.as_bool().ok()).unwrap_or(d)
+    };
+    let from = m
+        .get("from")
+        .and_then(|v| v.as_int().ok())
+        .map(|v| v.max(0) as usize)
+        .unwrap_or(0);
+    (
+        crate::search::SearchOpts {
+            regex: get_bool("regex", false),
+            match_case: get_bool("match_case", false),
+        },
+        get_bool("wrap", false),
+        from,
+    )
+}
+
 fn range_map(start: usize, end: usize) -> Map {
     let mut m = Map::new();
     m.insert("start".into(), Dynamic::from(start as i64));
@@ -520,6 +539,57 @@ fn api_engine(_ctx: Ctx) -> Engine {
         c.sel = (0, n);
         c.sel_dirty = true;
     });
+    engine.register_fn(
+        "find",
+        |e: &mut EditorApi, pattern: ImmutableString, o: Map| -> Dynamic {
+            let c = e.ctx.borrow();
+            let (opts, wrap, from) = parse_search_opts(&o);
+            match crate::search::compile(&pattern, opts)
+                .ok()
+                .and_then(|re| crate::search::find_next(&c.text, &re, from, false, wrap))
+            {
+                Some((a, b)) => Dynamic::from(range_map(a, b)),
+                None => Dynamic::UNIT,
+            }
+        },
+    );
+    engine.register_fn(
+        "find_all",
+        |e: &mut EditorApi, pattern: ImmutableString, o: Map| -> Array {
+            let c = e.ctx.borrow();
+            let (opts, _, _) = parse_search_opts(&o);
+            match crate::search::compile(&pattern, opts) {
+                Ok(re) => crate::search::find_all(&c.text, &re, 10_000)
+                    .into_iter()
+                    .map(|(a, b)| Dynamic::from(range_map(a, b)))
+                    .collect(),
+                Err(_) => Array::new(),
+            }
+        },
+    );
+    engine.register_fn(
+        "replace_all",
+        |e: &mut EditorApi,
+         pattern: ImmutableString,
+         repl: ImmutableString,
+         o: Map|
+         -> i64 {
+            let mut c = e.ctx.borrow_mut();
+            let (opts, _, _) = parse_search_opts(&o);
+            let Ok(re) = crate::search::compile(&pattern, opts) else {
+                return 0;
+            };
+            let (new, count) =
+                crate::search::replace_all(&c.text, &re, &repl, opts.regex);
+            if count > 0 {
+                c.text = new;
+                c.text_dirty = true;
+                let n = c.text.chars().count();
+                c.sel = (c.sel.0.min(n), c.sel.1.min(n));
+            }
+            count as i64
+        },
+    );
     engine.register_fn("language", |e: &mut EditorApi| -> ImmutableString {
         e.ctx
             .borrow()

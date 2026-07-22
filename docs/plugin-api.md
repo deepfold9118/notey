@@ -4,12 +4,14 @@
 > `src/plugins.rs`. Implemented: registration manifest (name/min_api/
 > commands/shortcuts/events), `notey.editor` text/selection subset,
 > `notey.buffers`, `notey.app` (version/config_dir/clipboard),
-> `notey.ui.status` / `alert`, and events `ready`, `buffer_opened`,
-> `buffer_activated`, `before_save`, `after_save`. Not yet implemented:
-> `line_range`, pos/line conversions, undo grouping, `find*`/`replace_all`,
-> encoding/line-ending setters, `confirm`/`prompt`/`form`/panels,
-> `selection_changed`/`text_changed`/`theme_changed` events, capabilities
-> beyond the default grant, and the WASM tier.
+> `notey.ui.status` / `alert`, `notey.editor.language`/`set_language`,
+> `notey.editor.find`/`find_all`/`replace_all` (regex via fancy-regex),
+> and events `ready`, `buffer_opened`, `buffer_activated`, `before_save`,
+> `after_save`. Not yet implemented: `line_range`, pos/line conversions,
+> undo grouping, encoding/line-ending setters,
+> `confirm`/`prompt`/`form`/panels, `selection_changed`/`text_changed`/
+> `theme_changed` events, capabilities beyond the default grant, and the
+> WASM tier.
 
 One API, two bindings: **Rhai scripts** (`scripts/`, hot-reloaded, sandboxed by
 construction) and **WASM plugins** (`plugins/`, wasmtime, capability-gated).

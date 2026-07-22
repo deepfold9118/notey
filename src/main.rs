@@ -5,6 +5,7 @@ mod doc;
 mod editor;
 mod ipc;
 mod plugins;
+mod search;
 mod session;
 mod spell;
 mod syntax;
