@@ -6,9 +6,10 @@
 //! by character offsets so the rest of the app (find, go-to, plugins) speaks
 //! the same coordinates as the classic editor.
 //!
-//! Preview limitations (documented in Preferences): no word wrap, no IME
-//! composition, single cursor (multi-cursor-ready data model comes with the
-//! full swap).
+//! Features: word wrap (per-line wrap-row cache), multi-cursor editing
+//! (Ctrl+Click to add cursors, Alt+drag for column selection, Escape to
+//! collapse), per-line spellcheck, compound undo, and basic IME (candidate
+//! window anchoring + commit; no inline composition preview yet).
 
 use eframe::egui::{
     self, Color32, Event, FontId, Key, Modifiers, Sense, TextFormat,
@@ -26,12 +27,28 @@ struct LineMeta {
     chr: usize,
 }
 
-struct EditOp {
-    at: usize, // char offset
+struct SingleEdit {
+    /// Char offset in the text as it was BEFORE the whole group applied
+    /// (the group is applied in descending offset order, so every `at`
+    /// stays valid in original coordinates).
+    at: usize,
     removed: String,
     inserted: String,
-    sel_before: (usize, usize),
-    sel_after: (usize, usize),
+}
+
+#[derive(Clone)]
+struct SelSnapshot {
+    anchor: usize,
+    cursor: usize,
+    extras: Vec<(usize, usize)>,
+}
+
+/// One undo step: one or more simultaneous range replacements (one per
+/// cursor), stored ascending by `at`.
+struct EditOp {
+    edits: Vec<SingleEdit>,
+    sel_before: SelSnapshot,
+    sel_after: SelSnapshot,
     time: f64,
 }
 
@@ -65,6 +82,13 @@ pub struct EditorState {
     wrap_key: (u32, u32),
     /// Preserved x position for repeated Up/Down.
     desired_x: Option<f32>,
+    /// Secondary cursors as (anchor, head); the primary lives in
+    /// `anchor`/`cursor`. Cleared by plain clicks, Escape, and external
+    /// selection changes.
+    pub extra_sels: Vec<(usize, usize)>,
+    /// Origin of an in-progress Alt+drag column selection, in content
+    /// coordinates relative to the text origin.
+    column_drag_origin: Option<(f32, f32)>,
 }
 
 impl EditorState {
@@ -75,12 +99,63 @@ impl EditorState {
     pub fn set_selection(&mut self, anchor: usize, cursor: usize) {
         self.anchor = anchor;
         self.cursor = cursor;
+        self.extra_sels.clear();
         self.scroll_to_cursor = true;
+    }
+
+    pub fn collapse_extras(&mut self) {
+        self.extra_sels.clear();
+    }
+
+    /// All selections ([primary, extras...]), unnormalized (anchor, head).
+    fn all_sels(&self) -> Vec<(usize, usize)> {
+        let mut v = Vec::with_capacity(1 + self.extra_sels.len());
+        v.push((self.anchor, self.cursor));
+        v.extend(self.extra_sels.iter().copied());
+        v
+    }
+
+    /// Drop duplicate/overlapping cursors (primary wins).
+    fn dedup_sels(&mut self) {
+        let primary = self.selection();
+        let mut seen: Vec<(usize, usize)> = vec![primary];
+        self.extra_sels.retain(|&(a, h)| {
+            let r = (a.min(h), a.max(h));
+            let clashes = seen
+                .iter()
+                .any(|s| *s == r || (r.0 < s.1 && r.1 > s.0) || (r.0 == r.1 && s.0 == s.1 && r.0 == s.0));
+            if clashes {
+                false
+            } else {
+                seen.push(r);
+                true
+            }
+        });
+    }
+
+    fn snapshot(&self) -> SelSnapshot {
+        SelSnapshot {
+            anchor: self.anchor,
+            cursor: self.cursor,
+            extras: self.extra_sels.clone(),
+        }
+    }
+
+    fn restore_snapshot(&mut self, s: &SelSnapshot) {
+        self.anchor = s.anchor;
+        self.cursor = s.cursor;
+        self.extra_sels = s.extras.clone();
+        self.clamp();
     }
 
     fn clamp(&mut self) {
         self.cursor = self.cursor.min(self.total_chars);
         self.anchor = self.anchor.min(self.total_chars);
+        let n = self.total_chars;
+        for s in &mut self.extra_sels {
+            s.0 = s.0.min(n);
+            s.1 = s.1.min(n);
+        }
     }
 
     /// Rebuild the line index if the document changed outside the editor.
@@ -168,7 +243,8 @@ impl EditorState {
         }
     }
 
-    /// Replace `range` (chars) with `insert`, recording undo.
+    /// Replace `range` (chars) with `insert` at the primary cursor only,
+    /// recording undo. Collapses secondary cursors.
     pub fn apply_edit(
         &mut self,
         text: &mut String,
@@ -176,66 +252,132 @@ impl EditorState {
         insert: &str,
         now: f64,
     ) {
-        self.ensure_index(text);
-        let (a, b) = (range.0.min(range.1), range.0.max(range.1));
-        let (a, b) = (a.min(self.total_chars), b.min(self.total_chars));
-        let first_line = self.line_of_char(a);
-        let last_line_old = self.line_of_char(b);
-        let old_lines = self.line_count();
-        let ab = self.char_to_byte(text, a);
-        let bb = self.char_to_byte(text, b);
-        let removed = text[ab..bb].to_string();
-        let sel_before = (self.anchor, self.cursor);
-        text.replace_range(ab..bb, insert);
-        let after = a + insert.chars().count();
-        self.anchor = after;
-        self.cursor = after;
-        self.scroll_to_cursor = true;
-        self.desired_x = None;
-        self.rebuild_index(text);
+        self.extra_sels.clear();
+        self.apply_multi(text, vec![range], insert, now);
+    }
 
-        // keep the wrap cache aligned: replace the edited lines' row counts
-        // with placeholders that get laid out lazily
-        if self.wrap_valid {
-            let span_old = last_line_old - first_line + 1;
-            let new_lines = self.line_count();
-            let span_new =
-                (span_old as i64 + new_lines as i64 - old_lines as i64).max(1) as usize;
-            if first_line + span_old <= self.wrap_rows.len() {
-                self.wrap_rows.splice(
-                    first_line..first_line + span_old,
-                    std::iter::repeat(u32::MAX).take(span_new),
-                );
-            } else {
-                self.wrap_valid = false;
+    /// Replace every range in `sels` (input order: [primary, extras...])
+    /// with `insert`, as ONE undo step. Each cursor ends up collapsed after
+    /// its own insertion.
+    pub fn apply_multi(
+        &mut self,
+        text: &mut String,
+        sels: Vec<(usize, usize)>,
+        insert: &str,
+        now: f64,
+    ) {
+        self.ensure_index(text);
+        // normalize: clamp, sort ascending, drop overlaps (keep first seen)
+        let mut norm: Vec<(usize, usize, usize)> = sels
+            .iter()
+            .enumerate()
+            .map(|(i, &(a, b))| {
+                let (a, b) = (a.min(b), a.max(b));
+                (a.min(self.total_chars), b.min(self.total_chars), i)
+            })
+            .collect();
+        norm.sort_by_key(|&(a, _, _)| a);
+        let mut filtered: Vec<(usize, usize, usize)> = Vec::with_capacity(norm.len());
+        for r in norm {
+            if let Some(l) = filtered.last() {
+                // overlapping range, or duplicate caret at the same spot
+                if r.0 < l.1 || (r.0 == l.0 && r.1 == l.1) {
+                    continue;
+                }
             }
+            filtered.push(r);
+        }
+        if filtered.is_empty() {
+            return;
         }
 
-        // group rapid single-character typing into one undo step
-        let mergeable = removed.is_empty()
-            && insert.chars().count() == 1
+        let sel_before = self.snapshot();
+        let ins_chars = insert.chars().count();
+
+        // apply descending so original-space offsets stay valid
+        let mut edits: Vec<SingleEdit> = Vec::with_capacity(filtered.len());
+        for &(a, b, _) in filtered.iter().rev() {
+            let first_line = self.line_of_char(a);
+            let last_line_old = self.line_of_char(b);
+            let ab = self.char_to_byte(text, a);
+            let bb = self.char_to_byte(text, b);
+            let removed = text[ab..bb].to_string();
+            text.replace_range(ab..bb, insert);
+
+            // wrap cache: mark the edited lines dirty (original line space —
+            // valid because we go top-down from the highest edit)
+            if self.wrap_valid {
+                let span_old = last_line_old - first_line + 1;
+                let removed_newlines = removed.matches('\n').count();
+                let inserted_newlines = insert.matches('\n').count();
+                let span_new = (span_old as i64 + inserted_newlines as i64
+                    - removed_newlines as i64)
+                    .max(1) as usize;
+                if first_line + span_old <= self.wrap_rows.len() {
+                    self.wrap_rows.splice(
+                        first_line..first_line + span_old,
+                        std::iter::repeat(u32::MAX).take(span_new),
+                    );
+                } else {
+                    self.wrap_valid = false;
+                }
+            }
+            edits.push(SingleEdit {
+                at: a,
+                removed,
+                inserted: insert.to_string(),
+            });
+        }
+        edits.reverse(); // store ascending
+        self.rebuild_index(text);
+
+        // final caret positions, ascending with cumulative shift
+        let mut shift: i64 = 0;
+        let mut new_pos: Vec<(usize, usize)> = Vec::with_capacity(filtered.len()); // (orig_idx, pos)
+        for (k, &(a, b, orig)) in filtered.iter().enumerate() {
+            let pos = (a as i64 + shift) as usize + ins_chars;
+            shift += ins_chars as i64 - (b - a) as i64;
+            new_pos.push((orig, pos));
+            let _ = k;
+        }
+        new_pos.sort_by_key(|&(orig, _)| orig);
+        if let Some(&(_, p)) = new_pos.first() {
+            self.anchor = p;
+            self.cursor = p;
+        }
+        self.extra_sels = new_pos.iter().skip(1).map(|&(_, p)| (p, p)).collect();
+        self.clamp();
+        self.scroll_to_cursor = true;
+        self.desired_x = None;
+
+        // group rapid single-cursor typing into one undo step
+        let single = edits.len() == 1 && self.extra_sels.is_empty();
+        let mergeable = single
+            && edits[0].removed.is_empty()
+            && ins_chars == 1
             && insert != "\n"
             && self
                 .undo
                 .last()
                 .map(|op| {
-                    op.removed.is_empty()
+                    op.edits.len() == 1
+                        && op.edits[0].removed.is_empty()
                         && now - op.time < 1.0
-                        && op.at + op.inserted.chars().count() == a
+                        && op.edits[0].at + op.edits[0].inserted.chars().count()
+                            == edits[0].at
                 })
                 .unwrap_or(false);
         if mergeable {
+            let snap = self.snapshot();
             let op = self.undo.last_mut().unwrap();
-            op.inserted.push_str(insert);
-            op.sel_after = (after, after);
+            op.edits[0].inserted.push_str(insert);
+            op.sel_after = snap;
             op.time = now;
         } else {
             self.undo.push(EditOp {
-                at: a,
-                removed,
-                inserted: insert.to_string(),
+                edits,
                 sel_before,
-                sel_after: (after, after),
+                sel_after: self.snapshot(),
                 time: now,
             });
             if self.undo.len() > 10_000 {
@@ -248,15 +390,19 @@ impl EditorState {
     pub fn undo(&mut self, text: &mut String) {
         self.ensure_index(text);
         let Some(op) = self.undo.pop() else { return };
-        let a = op.at;
-        let end = a + op.inserted.chars().count();
-        let ab = self.char_to_byte(text, a);
-        let eb = self.char_to_byte(text, end);
-        text.replace_range(ab..eb, &op.removed);
+        // Revert ascending: when edit k is undone, all edits below it are
+        // already restored, so the text below k matches the original and the
+        // stored original-space offset is directly valid. (Edits above k are
+        // still applied, but they cannot shift position k.)
+        for e in &op.edits {
+            let ins_chars = e.inserted.chars().count();
+            let ab = char_to_byte_scan(text, e.at);
+            let eb = char_to_byte_scan(text, e.at + ins_chars);
+            text.replace_range(ab..eb, &e.removed);
+        }
         self.wrap_valid = false;
         self.rebuild_index(text);
-        self.anchor = op.sel_before.0.min(self.total_chars);
-        self.cursor = op.sel_before.1.min(self.total_chars);
+        self.restore_snapshot(&op.sel_before);
         self.scroll_to_cursor = true;
         self.redo.push(op);
     }
@@ -264,15 +410,15 @@ impl EditorState {
     pub fn redo(&mut self, text: &mut String) {
         self.ensure_index(text);
         let Some(op) = self.redo.pop() else { return };
-        let a = op.at;
-        let end = a + op.removed.chars().count();
-        let ab = self.char_to_byte(text, a);
-        let eb = self.char_to_byte(text, end);
-        text.replace_range(ab..eb, &op.inserted);
+        // reapply descending: original-space offsets stay valid
+        for e in op.edits.iter().rev() {
+            let ab = char_to_byte_scan(text, e.at);
+            let eb = char_to_byte_scan(text, e.at + e.removed.chars().count());
+            text.replace_range(ab..eb, &e.inserted);
+        }
         self.wrap_valid = false;
         self.rebuild_index(text);
-        self.anchor = op.sel_after.0.min(self.total_chars);
-        self.cursor = op.sel_after.1.min(self.total_chars);
+        self.restore_snapshot(&op.sel_after);
         self.scroll_to_cursor = true;
         self.undo.push(op);
     }
@@ -285,6 +431,15 @@ impl EditorState {
         self.undo.clear();
         self.redo.clear();
     }
+}
+
+/// Index-free char→byte conversion for texts whose line index is stale
+/// (used during undo/redo replay).
+fn char_to_byte_scan(text: &str, chr: usize) -> usize {
+    text.char_indices()
+        .nth(chr)
+        .map(|(b, _)| b)
+        .unwrap_or(text.len())
 }
 
 // ---------- word helpers ----------
@@ -467,12 +622,12 @@ pub fn show(
                 }
             }
 
-            // ---- mouse â†’ cursor ----
+            // ---- mouse → cursor ----
             if let Some(pos) = resp.interact_pointer_pos() {
                 let c = pos_to_char(
                     state, text, pos, ui, th, spell, wrap_w, rect.top(), text_x, row_h,
                 );
-                let shift = ui.input(|i| i.modifiers.shift);
+                let mods = ui.input(|i| i.modifiers);
                 if resp.double_clicked() {
                     let line = state.line_of_char(c);
                     let (slice, start_chr) = state.line_slice(text, line);
@@ -480,26 +635,66 @@ pub fn show(
                     let (a, b) = word_bounds(&chars, c.saturating_sub(start_chr));
                     state.anchor = start_chr + a;
                     state.cursor = start_chr + b;
+                    state.collapse_extras();
                 } else if resp.triple_clicked() {
                     let line = state.line_of_char(c);
                     let (slice, start_chr) = state.line_slice(text, line);
                     let end = start_chr + slice.chars().count();
                     state.anchor = start_chr;
                     state.cursor = end;
+                    state.collapse_extras();
                 } else if resp.drag_started() {
-                    state.cursor = c;
-                    if !shift {
+                    if mods.alt {
+                        // column (box) selection
+                        state.column_drag_origin =
+                            Some((pos.x - text_x, pos.y - rect.top()));
                         state.anchor = c;
+                        state.cursor = c;
+                        state.collapse_extras();
+                    } else {
+                        state.column_drag_origin = None;
+                        state.cursor = c;
+                        if !mods.shift {
+                            state.anchor = c;
+                        }
+                        state.collapse_extras();
                     }
                     state.desired_x = None;
                 } else if resp.dragged() {
-                    state.cursor = c;
+                    if let Some(origin) = state.column_drag_origin {
+                        column_select(
+                            state,
+                            text,
+                            ui,
+                            th,
+                            spell,
+                            wrap_w,
+                            origin,
+                            (pos.x - text_x, pos.y - rect.top()),
+                            row_h,
+                        );
+                    } else {
+                        state.cursor = c;
+                    }
                 } else if resp.clicked() {
-                    state.cursor = c;
-                    if !shift {
+                    if mods.ctrl && !mods.shift && !mods.alt {
+                        // Ctrl+Click adds a cursor
+                        let old = (state.anchor, state.cursor);
+                        state.extra_sels.push(old);
                         state.anchor = c;
+                        state.cursor = c;
+                        state.dedup_sels();
+                    } else {
+                        state.cursor = c;
+                        if !mods.shift {
+                            state.anchor = c;
+                        }
+                        state.collapse_extras();
                     }
                     state.desired_x = None;
+                }
+                if resp.drag_stopped() {
+                    state.column_drag_origin = None;
                 }
             }
 
@@ -513,31 +708,45 @@ pub fn show(
                             if s.chars().all(|c| c.is_control()) {
                                 continue;
                             }
-                            let sel = state.selection();
-                            state.apply_edit(text, sel, s, now);
+                            let sels = state.all_sels();
+                            state.apply_multi(text, sels, s, now);
                             changed = true;
                         }
                         Event::Paste(s) => {
                             let s = s.replace("\r\n", "\n").replace('\r', "\n");
-                            let sel = state.selection();
-                            state.apply_edit(text, sel, &s, now);
+                            let sels = state.all_sels();
+                            state.apply_multi(text, sels, &s, now);
                             changed = true;
                         }
                         Event::Copy | Event::Cut => {
-                            let (a, b) = state.selection();
-                            if a != b {
-                                let ab = state.char_to_byte(text, a);
-                                let bb = state.char_to_byte(text, b);
-                                ui.ctx().copy_text(text[ab..bb].to_string());
+                            // multi-selection copy joins the pieces with newlines
+                            let mut ranges: Vec<(usize, usize)> = state
+                                .all_sels()
+                                .iter()
+                                .map(|&(a, h)| (a.min(h), a.max(h)))
+                                .filter(|(a, b)| a != b)
+                                .collect();
+                            ranges.sort_by_key(|&(a, _)| a);
+                            if !ranges.is_empty() {
+                                let pieces: Vec<&str> = ranges
+                                    .iter()
+                                    .map(|&(a, b)| {
+                                        let ab = state.char_to_byte(text, a);
+                                        let bb = state.char_to_byte(text, b);
+                                        &text[ab..bb]
+                                    })
+                                    .collect();
+                                ui.ctx().copy_text(pieces.join("\n"));
                                 if matches!(ev, Event::Cut) {
-                                    state.apply_edit(text, (a, b), "", now);
+                                    let sels = state.all_sels();
+                                    state.apply_multi(text, sels, "", now);
                                     changed = true;
                                 }
                             }
                         }
                         Event::Ime(egui::ImeEvent::Commit(s)) => {
-                            let sel = state.selection();
-                            state.apply_edit(text, sel, s, now);
+                            let sels = state.all_sels();
+                            state.apply_multi(text, sels, s, now);
                             changed = true;
                         }
                         Event::Key {
@@ -555,6 +764,7 @@ pub fn show(
                             };
                             if let Some(delta) = vertical {
                                 // refresh geometry in case earlier events edited
+                                state.collapse_extras();
                                 fill_wrap_cache(state, text, ui, th, spell, wrap_w);
                                 vertical_move(
                                     state,
@@ -582,7 +792,13 @@ pub fn show(
             fill_wrap_cache(state, text, ui, th, spell, wrap_w);
             let n_lines = state.line_count();
             let total_rows = state.total_visual_rows();
-            let (sel_a, sel_b) = state.selection();
+            let sels_all = state.all_sels();
+            let sel_ranges: Vec<(usize, usize)> = sels_all
+                .iter()
+                .map(|&(a, h)| (a.min(h), a.max(h)))
+                .filter(|(a, b)| a != b)
+                .collect();
+            let heads: Vec<usize> = sels_all.iter().map(|&(_, h)| h).collect();
             let cursor_line = state.line_of_char(state.cursor);
 
             // ---- visible range ----
@@ -601,7 +817,7 @@ pub fn show(
                 let line_end = start_chr + line_chars;
 
                 // current-line wash
-                if li == cursor_line && sel_a == sel_b {
+                if li == cursor_line && sel_ranges.is_empty() {
                     painter.rect_filled(
                         egui::Rect::from_min_size(
                             egui::pos2(rect.left(), y),
@@ -614,8 +830,11 @@ pub fn show(
 
                 let galley = line_galley(ui, slice, th, spell, wrap_w);
 
-                // selection highlight (may span wrapped rows)
-                if sel_a != sel_b && sel_a < line_end + 1 && sel_b > start_chr {
+                // selection highlights (may span wrapped rows; one per cursor)
+                for &(sel_a, sel_b) in &sel_ranges {
+                    if !(sel_a < line_end + 1 && sel_b > start_chr) {
+                        continue;
+                    }
                     let a = sel_a.max(start_chr) - start_chr;
                     let b = sel_b.min(line_end) - start_chr;
                     let ra = galley.pos_from_cursor(CCursor::new(a));
@@ -672,35 +891,43 @@ pub fn show(
 
                 painter.galley(egui::pos2(text_x, y), galley.clone(), th.text);
 
-                // caret
-                if li == cursor_line && focused {
+                // carets (one per cursor on this line)
+                if focused {
                     let blink_on = ((now * 2.0) as i64) % 2 == 0;
-                    let col = state.cursor - start_chr;
-                    let r = galley.pos_from_cursor(CCursor::new(col));
-                    if blink_on {
-                        painter.rect_filled(
-                            egui::Rect::from_min_size(
-                                egui::pos2(text_x + r.left(), y + r.top() + 2.0),
-                                egui::vec2(1.5, row_h - 4.0),
-                            ),
-                            0.0,
-                            th.caret,
-                        );
+                    for (hi, &head) in heads.iter().enumerate() {
+                        if head < start_chr || head > line_end {
+                            continue;
+                        }
+                        let col = head - start_chr;
+                        let r = galley.pos_from_cursor(CCursor::new(col));
+                        if blink_on {
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(text_x + r.left(), y + r.top() + 2.0),
+                                    egui::vec2(1.5, row_h - 4.0),
+                                ),
+                                0.0,
+                                th.caret,
+                            );
+                        }
+                        if hi == 0 {
+                            // let the OS position the IME window at the primary caret
+                            let caret_rect = egui::Rect::from_min_size(
+                                egui::pos2(text_x + r.left(), y + r.top()),
+                                egui::vec2(2.0, row_h),
+                            );
+                            ui.ctx().output_mut(|o| {
+                                o.ime = Some(egui::output::IMEOutput {
+                                    rect: caret_rect,
+                                    cursor_rect: caret_rect,
+                                    should_interrupt_composition: false,
+                                });
+                            });
+                            ui.ctx().request_repaint_after(
+                                std::time::Duration::from_millis(500),
+                            );
+                        }
                     }
-                    // let the OS position the IME candidate window at the caret
-                    let caret_rect = egui::Rect::from_min_size(
-                        egui::pos2(text_x + r.left(), y + r.top()),
-                        egui::vec2(2.0, row_h),
-                    );
-                    ui.ctx().output_mut(|o| {
-                        o.ime = Some(egui::output::IMEOutput {
-                            rect: caret_rect,
-                            cursor_rect: caret_rect,
-                            should_interrupt_composition: false,
-                        });
-                    });
-                    ui.ctx()
-                        .request_repaint_after(std::time::Duration::from_millis(500));
                 }
 
                 // gutter (pinned left, numbers on the first visual row)
@@ -890,6 +1117,47 @@ fn pos_to_char(
     start_chr + col.min(slice.chars().count())
 }
 
+/// Build a rectangular (column) selection between two content-space points:
+/// one cursor per visual row, each spanning the horizontal band.
+#[allow(clippy::too_many_arguments)]
+fn column_select(
+    state: &mut EditorState,
+    text: &str,
+    ui: &egui::Ui,
+    th: &EditorTheme,
+    spell: Option<&Spell>,
+    wrap_w: Option<f32>,
+    origin: (f32, f32),
+    current: (f32, f32),
+    row_h: f32,
+) {
+    let total = state.total_visual_rows();
+    let v0 = ((origin.1 / row_h).floor().max(0.0) as u32).min(total.saturating_sub(1));
+    let v1 = ((current.1 / row_h).floor().max(0.0) as u32).min(total.saturating_sub(1));
+    let (top, bot) = (v0.min(v1), v0.max(v1));
+    let mut sels: Vec<(usize, usize)> = Vec::new();
+    for v in top..=bot {
+        let line = state.line_at_visual_row(v);
+        let (slice, start) = state.line_slice(text, line);
+        let g = line_galley(ui, slice, th, spell, wrap_w);
+        let rel_y = (v - state.wrap_prefix[line]) as f32 * row_h + row_h * 0.5;
+        let n = slice.chars().count();
+        let a = usize::from(g.cursor_from_pos(egui::vec2(origin.0, rel_y)).index).min(n);
+        let h = usize::from(g.cursor_from_pos(egui::vec2(current.0, rel_y)).index).min(n);
+        sels.push((start + a, start + h));
+    }
+    if sels.is_empty() {
+        return;
+    }
+    // the primary cursor follows the pointer
+    let primary_idx = if v1 >= v0 { sels.len() - 1 } else { 0 };
+    let (pa, ph) = sels.remove(primary_idx);
+    state.anchor = pa;
+    state.cursor = ph;
+    state.extra_sels = sels;
+    state.dedup_sels();
+}
+
 /// Move the caret by visual rows (handles wrapped lines and preserves the
 /// desired x position across repeated moves).
 #[allow(clippy::too_many_arguments)]
@@ -947,6 +1215,13 @@ fn handle_key(
     let has_sel = sel_a != sel_b;
     let extend = m.shift;
 
+    // v1: plain navigation collapses secondary cursors
+    if !state.extra_sels.is_empty()
+        && matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End)
+    {
+        state.collapse_extras();
+    }
+
     let move_to = |state: &mut EditorState, pos: usize, extend: bool| {
         state.cursor = pos.min(state.total_chars);
         if !extend {
@@ -999,46 +1274,75 @@ fn handle_key(
             true
         }
         Key::Backspace => {
-            if has_sel {
-                state.apply_edit(text, (sel_a, sel_b), "", now);
-            } else if state.cursor > 0 {
-                let from = if m.ctrl {
-                    prev_word(state, text, state.cursor)
-                } else {
-                    state.cursor - 1
-                };
-                state.apply_edit(text, (from, state.cursor), "", now);
-            }
+            let ranges: Vec<(usize, usize)> = state
+                .all_sels()
+                .iter()
+                .map(|&(a, h)| {
+                    let (lo, hi) = (a.min(h), a.max(h));
+                    if lo != hi {
+                        (lo, hi)
+                    } else if hi > 0 {
+                        let from = if m.ctrl {
+                            prev_word(state, text, hi)
+                        } else {
+                            hi - 1
+                        };
+                        (from, hi)
+                    } else {
+                        (0, 0)
+                    }
+                })
+                .collect();
+            state.apply_multi(text, ranges, "", now);
             *changed = true;
             true
         }
         Key::Delete => {
-            if has_sel {
-                state.apply_edit(text, (sel_a, sel_b), "", now);
-            } else if state.cursor < state.total_chars {
-                let to = if m.ctrl {
-                    next_word(state, text, state.cursor)
-                } else {
-                    state.cursor + 1
-                };
-                state.apply_edit(text, (state.cursor, to), "", now);
-            }
+            let total = state.total_chars;
+            let ranges: Vec<(usize, usize)> = state
+                .all_sels()
+                .iter()
+                .map(|&(a, h)| {
+                    let (lo, hi) = (a.min(h), a.max(h));
+                    if lo != hi {
+                        (lo, hi)
+                    } else if hi < total {
+                        let to = if m.ctrl {
+                            next_word(state, text, hi)
+                        } else {
+                            hi + 1
+                        };
+                        (hi, to)
+                    } else {
+                        (total, total)
+                    }
+                })
+                .collect();
+            state.apply_multi(text, ranges, "", now);
             *changed = true;
             true
         }
         Key::Enter => {
-            state.apply_edit(text, (sel_a, sel_b), "\n", now);
+            let sels = state.all_sels();
+            state.apply_multi(text, sels, "\n", now);
             *changed = true;
             true
         }
         Key::Tab => {
-            state.apply_edit(text, (sel_a, sel_b), "\t", now);
+            let sels = state.all_sels();
+            state.apply_multi(text, sels, "\t", now);
             *changed = true;
             true
+        }
+        Key::Escape => {
+            let had = !state.extra_sels.is_empty();
+            state.collapse_extras();
+            had
         }
         Key::A if m.ctrl => {
             state.anchor = 0;
             state.cursor = state.total_chars;
+            state.collapse_extras();
             false
         }
         Key::Z if m.ctrl && !m.shift => {
@@ -1159,10 +1463,10 @@ mod tests {
 
     #[test]
     fn line_slice_and_lookup() {
-        let text = "alpha\nbÃ«ta\ngamma";
+        let text = "alpha\nbëta\ngamma";
         let s = state_for(text);
         assert_eq!(s.line_slice(text, 0).0, "alpha");
-        assert_eq!(s.line_slice(text, 1).0, "bÃ«ta");
+        assert_eq!(s.line_slice(text, 1).0, "bëta");
         assert_eq!(s.line_slice(text, 2).0, "gamma");
         assert_eq!(s.line_of_char(0), 0);
         assert_eq!(s.line_of_char(5), 0); // the newline belongs to line 0's end
@@ -1172,9 +1476,9 @@ mod tests {
 
     #[test]
     fn char_to_byte_multibyte() {
-        let text = "hÃ©llo\nwÃ¶rld";
+        let text = "héllo\nwörld";
         let s = state_for(text);
-        // 'Ã©' is 2 bytes: char 2 -> byte 3
+        // 'é' is 2 bytes: char 2 -> byte 3
         assert_eq!(s.char_to_byte(text, 2), 3);
         // char index past end clamps to len
         assert_eq!(s.char_to_byte(text, 999), text.len());
@@ -1215,10 +1519,10 @@ mod tests {
 
     #[test]
     fn edit_at_bounds_and_unicode() {
-        let mut text = String::from("æ—¥æœ¬èªž\nãƒ†ã‚¹ãƒˆ");
+        let mut text = String::from("日本語\nテスト");
         let mut s = state_for(&text);
-        s.apply_edit(&mut text, (0, 0), "â†’", 0.0);
-        assert_eq!(text, "â†’æ—¥æœ¬èªž\nãƒ†ã‚¹ãƒˆ");
+        s.apply_edit(&mut text, (0, 0), "→", 0.0);
+        assert_eq!(text, "→日本語\nテスト");
         let end = s.total_chars;
         s.apply_edit(&mut text, (end, end + 50), "!", 1.5);
         assert!(text.ends_with('!'));
@@ -1286,6 +1590,57 @@ mod tests {
         assert!(changed);
         s.undo(&mut text);
         assert_eq!(text, "hello\nworld");
+    }
+
+    #[test]
+    fn multi_cursor_insert_positions() {
+        let mut text = String::from("aaa\nbbb\nccc");
+        let mut s = state_for(&text);
+        // carets at the start of each line
+        s.anchor = 0;
+        s.cursor = 0;
+        s.extra_sels = vec![(4, 4), (8, 8)];
+        s.apply_multi(&mut text, vec![(0, 0), (4, 4), (8, 8)], "> ", 0.0);
+        assert_eq!(text, "> aaa\n> bbb\n> ccc");
+        // every caret sits right after its insertion
+        assert_eq!((s.anchor, s.cursor), (2, 2));
+        assert_eq!(s.extra_sels, vec![(8, 8), (14, 14)]);
+        assert_eq!(s.undo.len(), 1); // one compound step
+
+        s.undo(&mut text);
+        assert_eq!(text, "aaa\nbbb\nccc");
+        assert_eq!((s.anchor, s.cursor), (0, 0));
+        assert_eq!(s.extra_sels, vec![(4, 4), (8, 8)]);
+
+        s.redo(&mut text);
+        assert_eq!(text, "> aaa\n> bbb\n> ccc");
+        assert_eq!(s.extra_sels, vec![(8, 8), (14, 14)]);
+    }
+
+    #[test]
+    fn multi_cursor_delete_varying_widths() {
+        let mut text = String::from("xx123yy45zz6");
+        let mut s = state_for(&text);
+        // selections over the digit runs: 2-5, 7-9, 11-12
+        s.anchor = 2;
+        s.cursor = 5;
+        s.extra_sels = vec![(7, 9), (11, 12)];
+        let sels = vec![(2, 5), (7, 9), (11, 12)];
+        s.apply_multi(&mut text, sels, "", 0.0);
+        assert_eq!(text, "xxyyzz");
+        s.undo(&mut text);
+        assert_eq!(text, "xx123yy45zz6");
+        s.redo(&mut text);
+        assert_eq!(text, "xxyyzz");
+    }
+
+    #[test]
+    fn multi_cursor_overlaps_and_dupes_filtered() {
+        let mut text = String::from("abcdef");
+        let mut s = state_for(&text);
+        // duplicate caret and an overlapping range collapse to sane edits
+        s.apply_multi(&mut text, vec![(1, 3), (2, 4), (1, 3), (5, 5)], "_", 0.0);
+        assert_eq!(text, "a_de_f");
     }
 
     #[test]

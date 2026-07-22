@@ -62,8 +62,10 @@ for Notey's own editor widget (`src/editor.rs`): it lays out only the
 visible lines, so large files stay responsive, and it owns its
 cursor/selection/undo model (the foundation for multi-cursor, folding, and
 markers on the Notepad++ roadmap). It supports word wrap (per-line wrap-row
-cache with placeholder invalidation), spellcheck with right-click
-suggestions, visual-row cursor navigation, undo integration for
+cache with placeholder invalidation), **multi-cursor editing** (Ctrl+Click
+to add cursors, Alt+drag for column/box selection, Escape to collapse; all
+cursors type/delete/paste simultaneously as one undo step), spellcheck with
+right-click suggestions, visual-row cursor navigation, undo integration for
 find/replace and plugin edits, and basic IME (caret-anchored candidate
 window, committed text insertion — no inline composition preview yet).
 Default off; the classic editor remains the default until parity. Core
