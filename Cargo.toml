@@ -1,6 +1,6 @@
 [package]
 name = "notey"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "A native notepad with dark mode, tabs, and spellcheck"
 
@@ -21,6 +21,10 @@ syntect = { version = "5", default-features = false, features = ["default-fancy"
 fancy-regex = "0.18"
 ignore = "0.4"
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+url = "2"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+egui_commonmark = "0.24"
 
 [build-dependencies]
 winresource = "0.1"

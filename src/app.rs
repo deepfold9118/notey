@@ -65,6 +65,12 @@ pub struct NoteyApp {
     spell_enabled: bool,
 
     dark: bool,
+    custom_theme: Option<theme::ImportedTheme>,
+    installed_themes: Vec<crate::theme_marketplace::InstalledTheme>,
+    theme_url_open: bool,
+    theme_url: String,
+    theme_url_error: Option<String>,
+    theme_download_rx: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
     word_wrap: bool,
     show_status: bool,
     /// Always show the classic menu bar row. Off by default — the menus
@@ -73,6 +79,10 @@ pub struct NoteyApp {
     /// Use the virtualized preview editor instead of egui's TextEdit.
     preview_editor: bool,
     editor_states: HashMap<u64, EditorState>,
+    /// Tabs currently showing the rendered Markdown view instead of the
+    /// editor (session-transient, keyed by document id).
+    md_rendered: std::collections::HashSet<u64>,
+    md_cache: egui_commonmark::CommonMarkCache,
     font_size: f32,
     editor_font: String,
     line_height: f32, // multiplier, 1.0 = font default
@@ -162,11 +172,19 @@ impl NoteyApp {
             spell: Spell::new(),
             spell_enabled: true,
             dark: true,
+            custom_theme: None,
+            installed_themes: Vec::new(),
+            theme_url_open: false,
+            theme_url: String::new(),
+            theme_url_error: None,
+            theme_download_rx: None,
             word_wrap: true,
             show_status: true,
             show_menu: false,
             preview_editor: false,
             editor_states: HashMap::new(),
+            md_rendered: std::collections::HashSet::new(),
+            md_cache: egui_commonmark::CommonMarkCache::default(),
             font_size: 15.0,
             editor_font: "Consolas".to_string(),
             line_height: 1.0,
@@ -228,7 +246,9 @@ impl NoteyApp {
         };
 
         PluginHost::seed_examples();
+        PluginHost::seed_markdown_plugin();
         app.plugin_host = PluginHost::load();
+        app.installed_themes = crate::theme_marketplace::installed_themes();
 
         if let Some(storage) = cc.storage {
             let get_bool = |k: &str, d: bool| {
@@ -268,6 +288,18 @@ impl NoteyApp {
                     app.recent_files = list.into_iter().map(PathBuf::from).collect();
                 }
             }
+            if let Some(path) = storage.get_string("theme_path").filter(|path| !path.is_empty()) {
+                match theme::load_vscode_theme(PathBuf::from(path).as_path()) {
+                    Ok(imported) => {
+                        app.dark = imported.dark;
+                        app.custom_theme = Some(imported);
+                    }
+                    Err(err) => {
+                        app.status_msg =
+                            Some((format!("Theme could not be restored: {err}"), 0.0));
+                    }
+                }
+            }
         }
 
         // point the "editor" font family at the saved font choice
@@ -275,7 +307,7 @@ impl NoteyApp {
         let path = app.font_path(&font_name);
         rebuild_fonts(&cc.egui_ctx, path.as_deref(), app.tab_size);
 
-        theme::apply_fluent(&cc.egui_ctx, app.dark);
+        theme::apply_palette(&cc.egui_ctx, app.dark, app.palette());
 
         // decode the app icon for the custom title bar
         if let Ok(img) = image::load_from_memory(include_bytes!("../notey_icon.ico")) {
@@ -549,6 +581,107 @@ impl NoteyApp {
         self.status_msg = Some((msg, 0.0));
     }
 
+    fn palette(&self) -> theme::Palette {
+        self.custom_theme
+            .as_ref()
+            .map(|theme| theme.palette)
+            .unwrap_or_else(|| theme::palette(self.dark))
+    }
+
+    fn apply_current_theme(&mut self, ctx: &egui::Context) {
+        theme::apply_palette(ctx, self.dark, self.palette());
+        for state in self.editor_states.values_mut() {
+            if let Some(cache) = &mut state.hl {
+                cache.invalidate_all();
+            }
+        }
+    }
+
+    fn use_builtin_theme(&mut self, ctx: &egui::Context, dark: bool) {
+        self.custom_theme = None;
+        self.dark = dark;
+        self.apply_current_theme(ctx);
+    }
+
+    fn import_theme_dialog(&mut self, ctx: &egui::Context) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("VS Code color theme", &["json", "jsonc"])
+            .add_filter("TextMate theme", &["tmTheme"])
+            .pick_file()
+        else {
+            return;
+        };
+        match self.activate_theme_path(ctx, &path) {
+            Ok(name) => self.flash(format!("Theme: {name}")),
+            Err(err) => self.flash(format!("Theme import failed: {err}")),
+        }
+    }
+
+    fn activate_theme_path(
+        &mut self,
+        ctx: &egui::Context,
+        path: &std::path::Path,
+    ) -> Result<String, String> {
+        let imported = theme::load_vscode_theme(path)?;
+        let name = imported.name.clone();
+        self.dark = imported.dark;
+        self.custom_theme = Some(imported);
+        self.apply_current_theme(ctx);
+        Ok(name)
+    }
+
+    fn start_theme_url_import(&mut self) {
+        let url = self.theme_url.trim().to_string();
+        if url.is_empty() || self.theme_download_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.theme_url_error = None;
+        self.theme_download_rx = Some(rx);
+        self.flash("Downloading VS Code theme…".into());
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::theme_marketplace::download_theme(&url));
+        });
+    }
+
+    fn poll_theme_url_import(&mut self, ctx: &egui::Context) {
+        let outcome = self.theme_download_rx.as_ref().and_then(|rx| match rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Some(Err("the theme download stopped unexpectedly".into()))
+            }
+        });
+        let Some(outcome) = outcome else {
+            if self.theme_download_rx.is_some() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            return;
+        };
+        self.theme_download_rx = None;
+        match outcome {
+            Ok(path) => {
+                self.installed_themes = crate::theme_marketplace::installed_themes();
+                match self.activate_theme_path(ctx, &path) {
+                    Ok(name) => {
+                        self.theme_url.clear();
+                        self.theme_url_error = None;
+                        self.theme_url_open = false;
+                        self.flash(format!("Theme: {name}"));
+                    }
+                    Err(err) => {
+                        self.theme_url_error = Some(err.clone());
+                        self.flash(format!("Theme import failed: {err}"));
+                    }
+                }
+            }
+            Err(err) => {
+                self.theme_url_error = Some(err.clone());
+                self.flash(format!("Theme import failed: {err}"));
+            }
+        }
+    }
+
     // ---------- plugins ----------
 
     fn script_snapshot(&self, ctx: &egui::Context) -> ScriptCtx {
@@ -632,7 +765,27 @@ impl NoteyApp {
                         )),
                     }
                 }
+                HostAction::ToggleMarkdownPreview => {
+                    self.toggle_markdown_preview();
+                }
             }
+        }
+    }
+
+    /// Flip the active tab between the raw editor and the rendered
+    /// Markdown view. Only meaningful for Markdown tabs.
+    fn toggle_markdown_preview(&mut self) {
+        let doc = &self.docs[self.active];
+        if doc.language.as_deref() != Some("Markdown") {
+            self.flash("Not a Markdown tab".to_string());
+            return;
+        }
+        let id = doc.id;
+        if self.md_rendered.contains(&id) {
+            self.md_rendered.remove(&id);
+            self.focus_editor = true;
+        } else {
+            self.md_rendered.insert(id);
         }
     }
 
@@ -949,7 +1102,7 @@ impl NoteyApp {
         if !self.fif_panel {
             return;
         }
-        let p = theme::palette(self.dark);
+        let p = self.palette();
         let mut open_req: Option<(PathBuf, usize)> = None;
         egui::Panel::bottom(egui::Id::new("fif_results"))
             .resizable(false)
@@ -1296,12 +1449,71 @@ impl NoteyApp {
                     self.spell_enabled = spell_on;
                 }
                 ui.separator();
-                if ui
-                    .checkbox(&mut self.dark, "Dark Mode")
-                    .changed()
-                {
-                    theme::apply_fluent(ctx, self.dark);
-                }
+                ui.menu_button("Theme", |ui| {
+                    if ui
+                        .selectable_label(self.custom_theme.is_none() && self.dark, "Notey Dark")
+                        .clicked()
+                    {
+                        self.use_builtin_theme(ctx, true);
+                        ui.close();
+                    }
+                    if ui
+                        .selectable_label(self.custom_theme.is_none() && !self.dark, "Notey Light")
+                        .clicked()
+                    {
+                        self.use_builtin_theme(ctx, false);
+                        ui.close();
+                    }
+                    let active_theme_path = self
+                        .custom_theme
+                        .as_ref()
+                        .map(|theme| theme.path.clone());
+                    let active_is_installed = active_theme_path.as_ref().is_some_and(|path| {
+                        self.installed_themes
+                            .iter()
+                            .any(|theme| theme.path.as_path() == path.as_path())
+                    });
+                    let mut installed_pick = None;
+                    if !self.installed_themes.is_empty() {
+                        ui.menu_button("Installed Themes", |ui| {
+                            for theme in &self.installed_themes {
+                                let active = active_theme_path
+                                    .as_ref()
+                                    .is_some_and(|path| path.as_path() == theme.path.as_path());
+                                let label = format!("{} — {}", theme.label, theme.package);
+                                if ui.selectable_label(active, label).clicked() {
+                                    installed_pick = Some(theme.path.clone());
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                    if let Some(path) = installed_pick {
+                        match self.activate_theme_path(ctx, &path) {
+                            Ok(name) => self.flash(format!("Theme: {name}")),
+                            Err(err) => self.flash(format!("Theme could not be loaded: {err}")),
+                        }
+                        ui.close();
+                    }
+                    if !active_is_installed {
+                        if let Some(name) = self.custom_theme.as_ref().map(|theme| theme.name.clone()) {
+                            let _ = ui.selectable_label(true, name);
+                        }
+                    }
+                    ui.separator();
+                    if ui.button("Import VS Code Theme…").clicked() {
+                        ui.close();
+                        self.import_theme_dialog(ctx);
+                    }
+                    if ui.button("Get Theme from vscodethemes.com…").clicked() {
+                        self.theme_url_error = None;
+                        self.theme_url_open = true;
+                        ui.close();
+                    }
+                });
+            });
+            ui.menu_button("Language", |ui| {
+                self.language_picker_contents(ui);
             });
             ui.menu_button("Plugins", |ui| {
                 let mut run: Option<(usize, String)> = None;
@@ -1356,7 +1568,7 @@ impl NoteyApp {
     /// Custom Fluent title bar: app icon, Win11-style tabs, "+", a drag
     /// region, and min/max/close caption buttons.
     fn title_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let p = theme::palette(self.dark);
+        let p = self.palette();
         let bar = ui.max_rect();
         let painter = ui.painter().clone();
         let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
@@ -1596,7 +1808,12 @@ impl NoteyApp {
         );
         if drag_resp.double_clicked() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-        } else if drag_resp.drag_started() {
+        } else if drag_resp.is_pointer_button_down_on()
+            && ctx.input(|input| input.pointer.primary_pressed())
+        {
+            // Hand the press to the OS immediately. `drag_started()` waits
+            // for egui's movement threshold, which leaves the window behind
+            // the pointer by that initial dead-zone distance.
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
 
@@ -1650,6 +1867,17 @@ impl NoteyApp {
     }
 
     fn editor(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        // rendered Markdown view (toggled by the bundled Markdown Preview
+        // plugin) replaces whichever editor is active for this tab
+        let active_id = self.docs[self.active].id;
+        if self.md_rendered.contains(&active_id) {
+            if self.docs[self.active].language.as_deref() == Some("Markdown") {
+                self.markdown_view(ui);
+                return;
+            }
+            // language changed away from Markdown: fall back to the editor
+            self.md_rendered.remove(&active_id);
+        }
         if self.preview_editor {
             self.preview_editor_ui(ctx, ui);
             return;
@@ -1662,13 +1890,50 @@ impl NoteyApp {
             Some(base * self.line_height)
         };
         let text_color = ui.visuals().text_color();
+        let gutter_bg = self.palette().chrome;
         let spell_on = self.spell_enabled
             && self.spell.available()
             && self.docs[self.active].text.len() < 512 * 1024;
         let word_wrap = self.word_wrap;
         let editor_id = self.editor_id();
+        let doc_id = self.docs[self.active].id;
+        let language = self.docs[self.active].language.clone();
+        {
+            let state = self.editor_states.entry(doc_id).or_default();
+            match (&language, &state.hl) {
+                (None, Some(_)) => state.hl = None,
+                (Some(language), hl)
+                    if hl
+                        .as_ref()
+                        .map(|cache| &cache.syntax != language)
+                        .unwrap_or(true) =>
+                {
+                    state.hl = Some(crate::syntax::HlCache::new(language.clone()));
+                }
+                _ => {}
+            }
+        }
+        // egui's TextEdit treats any pointer press as the start of a text
+        // selection, including the secondary button. Keep the existing range
+        // so opening our context menu does not collapse it before Cut/Copy.
+        let selection_before_context_menu = ctx
+            .input(|i| i.pointer.secondary_pressed())
+            .then(|| {
+                egui::text_edit::TextEditState::load(ctx, editor_id)
+                    .and_then(|state| state.cursor.char_range())
+            })
+            .flatten();
 
+        let dark = self.dark;
+        let imported_syntax_theme = self
+            .custom_theme
+            .as_ref()
+            .map(|theme| Arc::clone(&theme.syntax));
         let spell = &self.spell;
+        let mut highlight = self
+            .editor_states
+            .get_mut(&doc_id)
+            .and_then(|state| state.hl.as_mut());
         let mut layouter = move |ui: &egui::Ui,
                                  buf: &dyn egui::TextBuffer,
                                  wrap_width: f32|
@@ -1682,6 +1947,42 @@ impl NoteyApp {
                 line_height,
                 ..Default::default()
             };
+            if let Some(cache) = highlight.as_deref_mut() {
+                cache.sync_source(text);
+                let lines: Vec<&str> = text.split('\n').collect();
+                cache.ensure(
+                    lines.len(),
+                    lines.len(),
+                    dark,
+                    imported_syntax_theme.as_deref(),
+                    |i| {
+                        let mut line = String::with_capacity(lines[i].len() + 1);
+                        line.push_str(lines[i]);
+                        line.push('\n');
+                        line
+                    },
+                );
+                let active_spell = spell_on.then_some(spell);
+                for (i, line) in lines.iter().enumerate() {
+                    let spans = cache
+                        .spans
+                        .get(i)
+                        .and_then(|spans| spans.as_deref())
+                        .unwrap_or(&[]);
+                    editor::append_highlighted_line(
+                        &mut job,
+                        line,
+                        spans,
+                        active_spell,
+                        &normal,
+                        Color32::from_rgb(232, 82, 82),
+                    );
+                    if i + 1 < lines.len() {
+                        job.append("\n", 0.0, normal.clone());
+                    }
+                }
+                return ui.fonts_mut(|f| f.layout_job(job));
+            }
             if !spell_on {
                 job.append(text, 0.0, normal);
             } else {
@@ -1728,6 +2029,14 @@ impl NoteyApp {
                 if let Some((gutter_left, gutter_w)) = gutter {
                     let painter = ui.painter();
                     let clip = ui.clip_rect();
+                    painter.rect_filled(
+                        egui::Rect::from_min_max(
+                            egui::pos2(gutter_left, clip.top()),
+                            egui::pos2(gutter_left + gutter_w, clip.bottom()),
+                        ),
+                        0.0,
+                        gutter_bg,
+                    );
                     let color = ui.visuals().weak_text_color();
                     let x_right = gutter_left + gutter_w - 8.0;
                     let mut line_no = 1usize;
@@ -1757,6 +2066,13 @@ impl NoteyApp {
                 output
             })
             .inner;
+
+        if let Some(range) = selection_before_context_menu {
+            let mut state =
+                egui::text_edit::TextEditState::load(ctx, editor_id).unwrap_or_default();
+            state.cursor.set_char_range(Some(range));
+            state.store(ctx, editor_id);
+        }
 
         if self.focus_editor {
             output.response.request_focus();
@@ -1839,11 +2155,45 @@ impl NoteyApp {
         }
     }
 
+    fn markdown_view(&mut self, ui: &mut egui::Ui) {
+        let mut back_to_editor = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Rendered Markdown")
+                    .italics()
+                    .weak()
+                    .size(12.0),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("Edit")
+                    .on_hover_text("Back to the raw editor (Ctrl+Shift+M)")
+                    .clicked()
+                {
+                    back_to_editor = true;
+                }
+            });
+        });
+        ui.separator();
+        let doc = &self.docs[self.active];
+        let doc_id = doc.id;
+        let text = doc.text.clone();
+        egui::ScrollArea::vertical()
+            .id_salt(("md_render", doc_id))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &text);
+            });
+        if back_to_editor {
+            self.toggle_markdown_preview();
+        }
+    }
+
     fn preview_editor_ui(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let font = FontId::new(self.font_size * self.zoom / 100.0, editor_family());
         let base_row = ui.fonts_mut(|f| f.row_height(&font));
         let row_h = base_row * self.line_height.max(0.5);
-        let p = theme::palette(self.dark);
+        let p = self.palette();
         let th = editor::theme_from_palette(&p, font, row_h, self.dark);
         let spell_on = self.spell_enabled
             && self.spell.available()
@@ -1851,6 +2201,10 @@ impl NoteyApp {
         let editor_id = egui::Id::new(("editor", self.docs[self.active].id));
         let request_focus = self.focus_editor;
         self.focus_editor = false;
+        let imported_syntax_theme = self
+            .custom_theme
+            .as_ref()
+            .map(|theme| Arc::clone(&theme.syntax));
 
         // keep the highlight cache in step with the document's language
         {
@@ -1887,6 +2241,7 @@ impl NoteyApp {
             spell,
             marks,
             request_focus,
+            imported_syntax_theme.as_deref(),
         );
         if result.changed {
             // char offsets are stale after edits
@@ -1947,7 +2302,6 @@ impl NoteyApp {
             }
             let mut new_enc: Option<Encoding> = None;
             let mut new_le: Option<LineEnding> = None;
-            let mut new_lang: Option<Option<String>> = None;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(cur_enc.label(), |ui| {
                     for enc in [
@@ -1979,41 +2333,10 @@ impl NoteyApp {
                 ui.separator();
                 let lang_label = cur_lang.clone().unwrap_or_else(|| "Plain Text".into());
                 ui.menu_button(lang_label, |ui| {
-                    ui.set_min_width(220.0);
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.lang_filter)
-                            .hint_text("Filter languages…"),
-                    );
-                    ui.separator();
-                    let filter = self.lang_filter.to_lowercase();
-                    egui::ScrollArea::vertical()
-                        .max_height(320.0)
-                        .show(ui, |ui| {
-                            if filter.is_empty() || "plain text".contains(&filter) {
-                                if ui
-                                    .selectable_label(cur_lang.is_none(), "Plain Text")
-                                    .clicked()
-                                {
-                                    new_lang = Some(None);
-                                    ui.close();
-                                }
-                            }
-                            for name in &crate::syntax::global().names {
-                                if !filter.is_empty()
-                                    && !name.to_lowercase().contains(&filter)
-                                {
-                                    continue;
-                                }
-                                let selected = cur_lang.as_deref() == Some(name);
-                                if ui.selectable_label(selected, name).clicked() {
-                                    new_lang = Some(Some(name.clone()));
-                                    ui.close();
-                                }
-                            }
-                        });
+                    self.language_picker_contents(ui);
                 })
                 .response
-                .on_hover_text("Syntax highlighting (preview editor)");
+                .on_hover_text("Syntax highlighting language");
                 ui.separator();
                 ui.label(format!("{zoom:.0}%"));
                 ui.separator();
@@ -2025,11 +2348,46 @@ impl NoteyApp {
             if let Some(le) = new_le {
                 self.docs[self.active].line_ending = le;
             }
-            if let Some(lang) = new_lang {
-                self.docs[self.active].language = lang;
-                self.lang_filter.clear();
-            }
         });
+    }
+
+    fn language_picker_contents(&mut self, ui: &mut egui::Ui) {
+        ui.set_min_width(220.0);
+        ui.add(
+            egui::TextEdit::singleline(&mut self.lang_filter).hint_text("Filter languages…"),
+        );
+        ui.separator();
+        let current = self.docs[self.active].language.clone();
+        let filter = self.lang_filter.to_lowercase();
+        let mut selected: Option<Option<String>> = None;
+        egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .show(ui, |ui| {
+                if (filter.is_empty() || "plain text".contains(&filter))
+                    && ui
+                        .selectable_label(current.is_none(), "Plain Text")
+                        .clicked()
+                {
+                    selected = Some(None);
+                    ui.close();
+                }
+                for name in &crate::syntax::global().names {
+                    if !filter.is_empty() && !name.to_lowercase().contains(&filter) {
+                        continue;
+                    }
+                    if ui
+                        .selectable_label(current.as_deref() == Some(name), name)
+                        .clicked()
+                    {
+                        selected = Some(Some(name.clone()));
+                        ui.close();
+                    }
+                }
+            });
+        if let Some(language) = selected {
+            self.docs[self.active].language = language;
+            self.lang_filter.clear();
+        }
     }
 
     fn find_window(&mut self, ctx: &egui::Context) {
@@ -2151,6 +2509,61 @@ impl NoteyApp {
                 }
             });
         self.goto_open = open && self.goto_open;
+    }
+
+    fn theme_url_window(&mut self, ctx: &egui::Context) {
+        if !self.theme_url_open {
+            return;
+        }
+        let mut open = self.theme_url_open;
+        let downloading = self.theme_download_rx.is_some();
+        let mut start_import = false;
+        egui::Window::new("Get VS Code Theme")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(480.0)
+            .show(ctx, |ui| {
+                ui.label("Copy a theme URL from vscodethemes.com and paste it below.");
+                ui.hyperlink_to("Browse vscodethemes.com", "https://vscodethemes.com/");
+                ui.add_space(6.0);
+                let response = ui.add_enabled(
+                    !downloading,
+                    egui::TextEdit::singleline(&mut self.theme_url)
+                        .hint_text("https://vscodethemes.com/e/publisher.extension/theme")
+                        .desired_width(f32::INFINITY),
+                );
+                if let Some(error) = &self.theme_url_error {
+                    ui.colored_label(egui::Color32::from_rgb(0xF1, 0x70, 0x7B), error);
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !downloading && !self.theme_url.trim().is_empty(),
+                            egui::Button::new(if downloading { "Downloading…" } else { "Import" }),
+                        )
+                        .clicked()
+                    {
+                        start_import = true;
+                    }
+                    if downloading {
+                        ui.spinner();
+                        ui.label("Downloading the Marketplace extension…");
+                    }
+                });
+                if response.lost_focus()
+                    && ui.input(|input| input.key_pressed(Key::Enter))
+                    && !downloading
+                    && !self.theme_url.trim().is_empty()
+                {
+                    start_import = true;
+                }
+            });
+        self.theme_url_open = open;
+        if start_import {
+            self.start_theme_url_import();
+        }
     }
 
     fn prefs_window(&mut self, ctx: &egui::Context) {
@@ -2481,6 +2894,7 @@ impl NoteyApp {
 impl eframe::App for NoteyApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = &root.ctx().clone();
+        self.poll_theme_url_import(ctx);
         // inject queued events (menu-driven undo/cut/copy/paste/…) so the
         // focused TextEdit picks them up this frame
         if !self.pending_events.is_empty() {
@@ -2619,7 +3033,7 @@ impl eframe::App for NoteyApp {
             }
         }
 
-        let p = theme::palette(self.dark);
+        let p = self.palette();
         egui::Panel::top(egui::Id::new("titlebar"))
             .resizable(false)
             .exact_size(40.0)
@@ -2668,6 +3082,7 @@ impl eframe::App for NoteyApp {
 
         self.find_window(ctx);
         self.goto_window(ctx);
+        self.theme_url_window(ctx);
         self.prefs_window(ctx);
         self.about_window(ctx);
         self.fif_window(ctx);
@@ -2702,6 +3117,13 @@ impl eframe::App for NoteyApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         let b = |v: bool| if v { "1" } else { "0" }.to_string();
         storage.set_string("dark", b(self.dark));
+        storage.set_string(
+            "theme_path",
+            self.custom_theme
+                .as_ref()
+                .map(|theme| theme.path.display().to_string())
+                .unwrap_or_default(),
+        );
         storage.set_string("word_wrap", b(self.word_wrap));
         storage.set_string("show_status", b(self.show_status));
         storage.set_string("spell", b(self.spell_enabled));

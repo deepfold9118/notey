@@ -12,7 +12,7 @@
 //! window anchoring + commit; no inline composition preview yet).
 
 use eframe::egui::{
-    self, Color32, Event, FontId, Key, Modifiers, Sense, TextFormat,
+    self, Color32, Event, FontId, Key, Modifiers, PointerButton, Sense, TextFormat,
 };
 use eframe::egui::text::{CCursor, LayoutJob};
 
@@ -524,7 +524,7 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
             Color32::from_rgba_unmultiplied(0, 0, 0, 6)
         },
         misspell: Color32::from_rgb(232, 82, 82),
-        gutter_bg: p.editor,
+        gutter_bg: p.chrome,
         mark: Color32::from_rgba_unmultiplied(
             p.accent.r(),
             p.accent.g(),
@@ -554,6 +554,7 @@ pub fn show(
     spell: Option<&Spell>,
     marks: &[(usize, usize)],
     request_focus: bool,
+    imported_syntax_theme: Option<&syntect::highlighting::Theme>,
 ) -> ShowResult {
     state.sync(text, revision);
     let mut changed = false;
@@ -615,7 +616,22 @@ pub fn show(
             let text_x = rect.left() + gutter_w + 6.0;
             let painter = ui.painter_at(ui.clip_rect());
 
-            if request_focus || resp.clicked() || resp.drag_started() {
+            if show_line_numbers {
+                let clip = ui.clip_rect();
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        clip.left_top(),
+                        egui::pos2(clip.left() + gutter_w, clip.bottom()),
+                    ),
+                    0.0,
+                    th.gutter_bg,
+                );
+            }
+
+            if request_focus
+                || resp.clicked()
+                || resp.drag_started_by(PointerButton::Primary)
+            {
                 ui.memory_mut(|m| m.request_focus(editor_id));
             }
             let focused = ui.memory(|m| m.has_focus(editor_id));
@@ -672,7 +688,7 @@ pub fn show(
                     state.anchor = start_chr;
                     state.cursor = end;
                     state.collapse_extras();
-                } else if resp.drag_started() {
+                } else if resp.drag_started_by(PointerButton::Primary) {
                     if mods.alt {
                         // column (box) selection
                         state.column_drag_origin =
@@ -689,7 +705,7 @@ pub fn show(
                         state.collapse_extras();
                     }
                     state.desired_x = None;
-                } else if resp.dragged() {
+                } else if resp.dragged_by(PointerButton::Primary) {
                     if let Some(origin) = state.column_drag_origin {
                         column_select(
                             state,
@@ -722,7 +738,7 @@ pub fn show(
                     }
                     state.desired_x = None;
                 }
-                if resp.drag_stopped() {
+                if resp.drag_stopped_by(PointerButton::Primary) {
                     state.column_drag_origin = None;
                 }
             }
@@ -839,7 +855,7 @@ pub fn show(
 
             // syntax highlight: parse forward (cached) up to the visible bottom
             if let Some(mut hl) = state.hl.take() {
-                hl.ensure(last, n_lines, th.dark, |i| {
+                hl.ensure(last, n_lines, th.dark, imported_syntax_theme, |i| {
                     let (s, _) = state.line_slice(text, i);
                     let mut l = String::with_capacity(s.len() + 1);
                     l.push_str(s);
@@ -1552,7 +1568,14 @@ fn line_galley_colored(
             Some(sp) => misspelled_byte_ranges(slice, sp),
             None => Vec::new(),
         };
-        append_colored(&mut job, slice, spans, &bad_ranges, &base, th);
+        append_colored(
+            &mut job,
+            slice,
+            spans,
+            &bad_ranges,
+            &base,
+            th.misspell,
+        );
         return ui.ctx().fonts_mut(|f| f.layout_job(job));
     }
     let normal = base;
@@ -1616,7 +1639,7 @@ fn append_colored(
     spans: &[(Color32, u32)],
     bad_ranges: &[(usize, usize)],
     base: &TextFormat,
-    th: &EditorTheme,
+    misspell: Color32,
 ) {
     let len = text.len();
     let mut pos = 0usize;
@@ -1658,16 +1681,47 @@ fn append_colored(
             ..base.clone()
         };
         if in_bad {
-            fmt.underline = egui::Stroke::new(1.5, th.misspell);
+            fmt.underline = egui::Stroke::new(1.5, misspell);
         }
         job.append(&text[pos..next], 0.0, fmt);
         pos = next;
     }
 }
 
+/// Add one syntax-colored line to a larger text layout while retaining
+/// spellcheck underlines. Used by the standard editor's full-buffer galley.
+pub(crate) fn append_highlighted_line(
+    job: &mut LayoutJob,
+    text: &str,
+    spans: &[(Color32, u32)],
+    spell: Option<&Spell>,
+    base: &TextFormat,
+    misspell: Color32,
+) {
+    let bad_ranges = spell
+        .map(|sp| misspelled_byte_ranges(text, sp))
+        .unwrap_or_default();
+    append_colored(job, text, spans, &bad_ranges, base, misspell);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gutter_uses_window_chrome_color() {
+        for dark in [false, true] {
+            let palette = crate::theme::palette(dark);
+            let theme = theme_from_palette(
+                &palette,
+                FontId::monospace(14.0),
+                18.0,
+                dark,
+            );
+            assert_eq!(theme.gutter_bg, palette.chrome);
+            assert_ne!(theme.gutter_bg, palette.editor);
+        }
+    }
 
     fn state_for(text: &str) -> EditorState {
         let mut s = EditorState::default();

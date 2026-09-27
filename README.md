@@ -41,6 +41,16 @@ starts. Closing an individual tab still prompts to save. Secondary
   middle-click a tab to close it, unsaved-changes prompt on close
 - **Spellchecker** — red underline on misspelled words; right-click a word for
   suggestions or "Add to dictionary" (en_US Hunspell dictionary, embedded)
+- **Syntax highlighting** — syntect + two-face grammars for roughly 250
+  languages, auto-detected by file extension with a filterable language picker
+  in the status bar and a dedicated Language menu for untitled files
+- **Themes** — built-in Notey Dark and Light themes plus imported VS Code
+  color-theme JSON/JSONC and TextMate `.tmTheme` files; workbench colors apply
+  across the full Notey interface and `tokenColors` drive syntax highlighting.
+  Notey can also import a copied `vscodethemes.com` URL by downloading and
+  extracting the complete theme from its Visual Studio Marketplace extension;
+  downloaded packages and all their theme variants remain available under
+  View > Theme > Installed Themes
 - File: New Tab / New Window / Open / Save / Save As / Print / Exit
 - Edit: Undo, Redo, Cut, Copy, Paste, Delete, Find, Find Next (F3),
   Find Previous (Shift+F3), Replace, Go To line (Ctrl+G), Select All,
@@ -54,7 +64,8 @@ starts. Closing an individual tab still prompts to save. Secondary
   fonts, with filter), font size, line height, line numbers, word wrap —
   all persisted between runs
 - View: Zoom (Ctrl+Plus / Ctrl+Minus / Ctrl+0), status bar toggle,
-  spellcheck toggle, dark mode toggle
+  spellcheck toggle, theme selection, local theme import, and
+  `vscodethemes.com` URL import
 - Status bar: line/column, character count, zoom, and **clickable** line
   endings (CRLF / LF) and encoding (UTF-8, UTF-8 BOM, UTF-16 LE/BE, ANSI)
   selectors for the current file
@@ -71,10 +82,8 @@ Preferences > Editor > "Preview editor (virtualized)" swaps egui's TextEdit
 for Notey's own editor widget (`src/editor.rs`): it lays out only the
 visible lines, so large files stay responsive, and it owns its
 cursor/selection/undo model (the foundation for multi-cursor, folding, and
-markers on the Notepad++ roadmap). It supports **syntax highlighting**
-(syntect + two-face grammars, ~250 languages, auto-detected by extension
-with a filterable language picker in the status bar; parse states are
-cached per line so only visible lines are ever parsed), word wrap
+markers on the Notepad++ roadmap). For syntax highlighting, parse states are
+cached per line so only visible lines are ever parsed. It also supports word wrap
 (per-line wrap-row cache with placeholder invalidation), **multi-cursor
 editing** (Ctrl+Click
 to add cursors, Alt+drag for column/box selection, Escape to collapse; all
@@ -92,7 +101,10 @@ register commands into the **Plugins** menu (with optional keyboard
 shortcuts) and can subscribe to host events (`ready`, `buffer_opened`,
 `buffer_activated`, `before_save`, `after_save`). Scripts drive the editor
 through the `notey.*` API — see [docs/plugin-api.md](docs/plugin-api.md).
-An example script (`sort_lines.rhai`, Ctrl+Alt+S) is created on first run.
+An example script (`sort_lines.rhai`, Ctrl+Alt+S) is created on first run,
+and a bundled `markdown_preview.rhai` plugin adds a raw/rendered toggle
+for Markdown tabs (Ctrl+Shift+M, or Plugins > Toggle Raw/Rendered
+Markdown — rendering via egui_commonmark).
 Plugins > Reload Scripts picks up changes without restarting.
 
 Scripts run sandboxed (no filesystem or network access) with an operation

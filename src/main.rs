@@ -10,6 +10,7 @@ mod session;
 mod spell;
 mod syntax;
 mod theme;
+mod theme_marketplace;
 
 use std::path::PathBuf;
 

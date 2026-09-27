@@ -4,7 +4,10 @@
 > `src/plugins.rs`. Implemented: registration manifest (name/min_api/
 > commands/shortcuts/events), `notey.editor` text/selection subset,
 > `notey.buffers`, `notey.app` (version/config_dir/clipboard),
-> `notey.ui.status` / `alert`, `notey.editor.language`/`set_language`,
+> `notey.ui.status` / `alert` / `toggle_markdown_preview` (flips the
+> active Markdown tab between the raw editor and a host-rendered view —
+> used by the bundled `markdown_preview.rhai` plugin, Ctrl+Shift+M),
+> `notey.editor.language`/`set_language`,
 > `notey.editor.find`/`find_all`/`replace_all` (regex via fancy-regex),
 > and events `ready`, `buffer_opened`, `buffer_activated`, `before_save`,
 > `after_save`. Not yet implemented: `line_range`, pos/line conversions,

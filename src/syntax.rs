@@ -1,4 +1,4 @@
-//! Syntax highlighting for the preview editor, built on syntect + two-face.
+//! Syntax highlighting for both editors, built on syntect + two-face.
 //!
 //! Highlighting is virtualization-friendly: `HlCache` snapshots the parser
 //! state at every line boundary, so only lines up to the visible bottom are
@@ -7,6 +7,7 @@
 //! look; bold/italic style flags are deliberately ignored so glyph geometry
 //! stays identical to the unhighlighted layout (hit-testing relies on that).
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::OnceLock;
 
 use eframe::egui::Color32;
@@ -77,6 +78,8 @@ fn to_color32(c: syntect::highlighting::Color) -> Color32 {
 /// runs, plus parser-state snapshots at each line boundary.
 pub struct HlCache {
     pub syntax: String,
+    source_hash: Option<u64>,
+    theme_key: Option<u8>,
     /// states[i] = (parse, highlight) state BEFORE line i. len >= 1 once used.
     states: Vec<(ParseState, HighlightState)>,
     /// spans[i] = color runs for line i (byte lengths sum to the line's
@@ -88,8 +91,22 @@ impl HlCache {
     pub fn new(syntax: String) -> Self {
         Self {
             syntax,
+            source_hash: None,
+            theme_key: None,
             states: Vec::new(),
             spans: Vec::new(),
+        }
+    }
+
+    /// Invalidate cached spans when an editor cannot report the first line
+    /// changed by an edit (egui's TextEdit only reports that text changed).
+    pub fn sync_source(&mut self, text: &str) {
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        let hash = hasher.finish();
+        if self.source_hash != Some(hash) {
+            self.invalidate_all();
+            self.source_hash = Some(hash);
         }
     }
 
@@ -114,13 +131,25 @@ impl HlCache {
         upto: usize,
         n_lines: usize,
         dark: bool,
+        imported_theme: Option<&Theme>,
         mut line_at: impl FnMut(usize) -> String,
     ) {
+        let theme_key = if imported_theme.is_some() {
+            2
+        } else if dark {
+            1
+        } else {
+            0
+        };
+        if self.theme_key != Some(theme_key) {
+            self.invalidate_all();
+            self.theme_key = Some(theme_key);
+        }
         let g = global();
         let Some(sr) = g.set.find_syntax_by_name(&self.syntax) else {
             return;
         };
-        let theme = if dark { &g.theme_dark } else { &g.theme_light };
+        let theme = imported_theme.unwrap_or(if dark { &g.theme_dark } else { &g.theme_light });
         let highlighter = Highlighter::new(theme);
         if self.spans.len() != n_lines {
             self.spans.resize(n_lines, None);
@@ -204,7 +233,7 @@ mod tests {
     fn highlights_rust_line_spans_match_bytes() {
         let mut hl = HlCache::new("Rust".to_string());
         let lines = ["fn main() {", "    let x = 1; // hi", "}"];
-        hl.ensure(3, 3, true, |i| format!("{}\n", lines[i]));
+        hl.ensure(3, 3, true, None, |i| format!("{}\n", lines[i]));
         for (i, line) in lines.iter().enumerate() {
             let spans = hl.spans[i].as_ref().expect("spans computed");
             let total: u32 = spans.iter().map(|s| s.1).sum();
@@ -216,7 +245,7 @@ mod tests {
     fn invalidation_truncates_states() {
         let mut hl = HlCache::new("Rust".to_string());
         let lines = ["fn a() {}", "fn b() {}", "fn c() {}"];
-        hl.ensure(3, 3, true, |i| format!("{}\n", lines[i]));
+        hl.ensure(3, 3, true, None, |i| format!("{}\n", lines[i]));
         assert_eq!(hl.states.len(), 4);
         hl.invalidate_from(1, 3);
         assert_eq!(hl.states.len(), 2);
@@ -224,7 +253,40 @@ mod tests {
         assert!(hl.spans[1].is_none());
         assert!(hl.spans[2].is_none());
         // re-ensure recomputes
-        hl.ensure(3, 3, true, |i| format!("{}\n", lines[i]));
+        hl.ensure(3, 3, true, None, |i| format!("{}\n", lines[i]));
         assert!(hl.spans.iter().all(|s| s.is_some()));
+    }
+
+    #[test]
+    fn source_change_invalidates_cached_spans() {
+        let mut hl = HlCache::new("Rust".to_string());
+        hl.sync_source("fn a() {}");
+        hl.ensure(1, 1, true, None, |_| "fn a() {}\n".to_string());
+        assert_eq!(hl.states.len(), 2);
+
+        hl.sync_source("fn a() {}");
+        assert_eq!(hl.states.len(), 2);
+
+        hl.sync_source("fn longer_name() {}");
+        assert!(hl.states.is_empty());
+        assert!(hl.spans.is_empty());
+    }
+
+    #[test]
+    fn imported_theme_colors_are_used() {
+        let mut imported = Theme::default();
+        imported.settings.foreground = Some(syntect::highlighting::Color {
+            r: 0x12,
+            g: 0x34,
+            b: 0x56,
+            a: 0xff,
+        });
+        imported.settings.background = Some(syntect::highlighting::Color::BLACK);
+        let mut hl = HlCache::new("Rust".to_string());
+        hl.ensure(1, 1, true, Some(&imported), |_| "plain_name\n".to_string());
+        let spans = hl.spans[0].as_ref().unwrap();
+        assert!(spans.iter().all(|(color, _)| {
+            *color == Color32::from_rgb(0x12, 0x34, 0x56)
+        }));
     }
 }

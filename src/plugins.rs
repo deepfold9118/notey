@@ -28,6 +28,7 @@ pub enum HostAction {
     Alert(String, String),
     SetClipboard(String),
     SetLanguage(Option<String>),
+    ToggleMarkdownPreview,
 }
 
 #[derive(Clone)]
@@ -247,6 +248,20 @@ fn join(parts, sep) {
         );
     }
 
+    /// Install the bundled Markdown preview plugin if the user hasn't
+    /// already got (or edited) one. Unlike `seed_examples`, this runs even
+    /// when other scripts exist, so existing installs pick it up — but it
+    /// never overwrites a present file.
+    pub fn seed_markdown_plugin() {
+        let Some(dir) = Self::scripts_dir() else { return };
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("markdown_preview.rhai");
+        if path.exists() {
+            return;
+        }
+        let _ = std::fs::write(&path, MARKDOWN_PREVIEW_SCRIPT);
+    }
+
     /// Run `on_command` in the given script. Returns the mutated context.
     pub fn run_command(&mut self, script_idx: usize, cmd_id: &str, ctx: ScriptCtx) -> ScriptCtx {
         self.run_fn(script_idx, "on_command", vec![Dynamic::from(ImmutableString::from(cmd_id))], ctx)
@@ -286,32 +301,62 @@ fn join(parts, sep) {
                 self.errors.push(format!("{name}: {fn_name}: {msg}"));
             }
         }
+        // Both the engine's registered closures AND the scope's `notey`
+        // constant hold Rc clones of the context; drop them before
+        // unwrapping, or the fallback path would discard queued actions.
         drop(engine);
+        drop(scope);
         match Rc::try_unwrap(shared) {
             Ok(cell) => cell.into_inner(),
-            Err(rc) => rc.borrow().clone_out(),
+            Err(rc) => {
+                // a script kept a reference alive; still recover everything,
+                // moving the (non-cloneable) actions out
+                let mut c = rc.borrow_mut();
+                ScriptCtx {
+                    text: c.text.clone(),
+                    sel: c.sel,
+                    text_dirty: c.text_dirty,
+                    sel_dirty: c.sel_dirty,
+                    buffers: c.buffers.clone(),
+                    active_id: c.active_id,
+                    language: c.language.clone(),
+                    config_dir: c.config_dir.clone(),
+                    actions: std::mem::take(&mut c.actions),
+                    status: c.status.clone(),
+                }
+            }
         }
     }
 }
 
-impl ScriptCtx {
-    /// Fallback if a script leaked a reference to the context (shouldn't
-    /// happen, but never panic on plugin behavior).
-    fn clone_out(&self) -> ScriptCtx {
-        ScriptCtx {
-            text: self.text.clone(),
-            sel: self.sel,
-            text_dirty: self.text_dirty,
-            sel_dirty: self.sel_dirty,
-            buffers: self.buffers.clone(),
-            active_id: self.active_id,
-            language: self.language.clone(),
-            config_dir: self.config_dir.clone(),
-            actions: Vec::new(), // actions can't be cloned; drop them
-            status: self.status.clone(),
+/// Bundled plugin: raw/rendered toggle for Markdown tabs. The rendering
+/// itself lives in the host (a script cannot paint); this command flips it.
+const MARKDOWN_PREVIEW_SCRIPT: &str = r#"// Notey bundled plugin: Markdown raw/rendered toggle.
+// Delete this file to remove the command; it will not be recreated once a
+// file with this name has existed. Docs: docs/plugin-api.md in the repo.
+
+fn register() {
+    #{
+        name: "Markdown Preview",
+        version: "1.0.0",
+        min_api: 1,
+        commands: [
+            #{ id: "toggle_md", title: "Toggle Raw/Rendered Markdown", shortcut: "Ctrl+Shift+M" },
+        ],
+        events: [],
+    }
+}
+
+fn on_command(id) {
+    if id == "toggle_md" {
+        if notey.editor.language() == "Markdown" {
+            notey.ui.toggle_markdown_preview();
+        } else {
+            notey.ui.status("Not a Markdown tab - set the language to Markdown in the status bar first");
         }
     }
 }
+"#;
 
 // ---------- shortcut parsing ("Ctrl+Alt+S") ----------
 
@@ -705,6 +750,76 @@ fn api_engine(_ctx: Ctx) -> Engine {
                 .push(HostAction::Alert(title.to_string(), body.to_string()));
         },
     );
+    engine.register_fn("toggle_markdown_preview", |u: &mut UiApi| {
+        u.ctx
+            .borrow_mut()
+            .actions
+            .push(HostAction::ToggleMarkdownPreview);
+    });
 
     engine
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_markdown_plugin_parses_and_registers() {
+        let dir = std::env::temp_dir().join(format!(
+            "notey-md-plugin-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("markdown_preview.rhai");
+        std::fs::write(&path, MARKDOWN_PREVIEW_SCRIPT).unwrap();
+
+        let script = PluginHost::load_script(&path).expect("bundled script loads");
+        assert_eq!(script.name, "Markdown Preview");
+        assert_eq!(script.commands.len(), 1);
+        assert_eq!(script.commands[0].id, "toggle_md");
+        assert_eq!(
+            script.commands[0].shortcut,
+            parse_shortcut("Ctrl+Shift+M")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn markdown_toggle_action_reaches_host_via_real_dispatch() {
+        // exercises the exact runtime path: bare-engine-compiled AST from
+        // disk, run_command with call options, error swallowing and all
+        let dir = std::env::temp_dir().join(format!(
+            "notey-md-dispatch-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("markdown_preview.rhai");
+        std::fs::write(&path, MARKDOWN_PREVIEW_SCRIPT).unwrap();
+        let script = PluginHost::load_script(&path).expect("loads");
+        let mut host = PluginHost {
+            scripts: vec![script],
+            errors: Vec::new(),
+        };
+        let ctx = ScriptCtx {
+            text: String::new(),
+            sel: (0, 0),
+            text_dirty: false,
+            sel_dirty: false,
+            buffers: Vec::new(),
+            active_id: 1,
+            language: Some("Markdown".to_string()),
+            config_dir: String::new(),
+            actions: Vec::new(),
+            status: None,
+        };
+        let out = host.run_command(0, "toggle_md", ctx);
+        assert!(host.errors.is_empty(), "plugin errors: {:?}", host.errors);
+        assert!(
+            matches!(out.actions.as_slice(), [HostAction::ToggleMarkdownPreview]),
+            "expected toggle action; status was {:?}",
+            out.status
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
