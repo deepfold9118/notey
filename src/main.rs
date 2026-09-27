@@ -29,7 +29,43 @@ fn load_icon() -> Option<egui::IconData> {
     })
 }
 
+/// Release builds have no console, so a panic would otherwise vanish
+/// without a trace. Append it to `%APPDATA%\Notey\crash.log`.
+fn install_crash_log() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(dir) = eframe::storage_dir("Notey").and_then(|d| d.parent().map(|p| p.to_path_buf())) {
+            let location = info
+                .location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_default();
+            let message = info
+                .payload()
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+            let entry = format!(
+                "[{}] Notey {} panicked on thread '{thread}' at {location}: {message}\n",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                env!("CARGO_PKG_VERSION"),
+            );
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("crash.log"))
+            {
+                let _ = f.write_all(entry.as_bytes());
+            }
+        }
+        default_hook(info);
+    }));
+}
+
 fn main() -> eframe::Result {
+    install_crash_log();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let new_window = args.iter().any(|a| a == "--new-window");
     let paths: Vec<PathBuf> = args

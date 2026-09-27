@@ -41,11 +41,12 @@ starts. Closing an individual tab still prompts to save. Secondary
 - **Dark mode** by default (toggle in View menu; remembered between runs)
 - **Tabs** — Ctrl+N new tab, Ctrl+W close, Ctrl+Tab / Ctrl+Shift+Tab to switch,
   middle-click a tab to close it, unsaved-changes prompt on close
-- **Spellchecker** — red underline on misspelled words; right-click a word for
-  suggestions or "Add to dictionary" (en_US Hunspell dictionary, embedded)
-- **Syntax highlighting** — syntect + two-face grammars for roughly 250
-  languages, auto-detected by file extension with a filterable language picker
-  in the status bar and a dedicated Language menu for untitled files
+- **Spellchecker** (plugin) — red underline on misspelled words; right-click
+  a word for suggestions or "Add to dictionary"; dictionaries come from
+  Language plugins
+- **Syntax highlighting** (plugins) — one File Type plugin per language (45
+  available), auto-detected by file extension with a filterable language
+  picker in the status bar and a dedicated Language menu for untitled files
 - **Themes** — built-in Notey Dark and Light themes plus imported VS Code
   color-theme JSON/JSONC and TextMate `.tmTheme` files; workbench colors apply
   across the full Notey interface and `tokenColors` drive syntax highlighting.
@@ -78,10 +79,11 @@ starts. Closing an individual tab still prompts to save. Secondary
 - **Recent Files** submenu in the File menu (last 10, persisted)
 - **Autosave** (Preferences): periodically saves modified file-backed tabs
 
-## Preview editor
+## Editor
 
-Preferences > Editor > "Preview editor (virtualized)" swaps egui's TextEdit
-for Notey's own editor widget (`src/editor.rs`): it lays out only the
+Notey's default editor is its own virtualized widget (`src/editor.rs`),
+which replaced egui's TextEdit in 0.4.0; Preferences > Editor >
+"Virtualized editor" switches back to the classic one. It lays out only the
 visible lines, so large files stay responsive, and it owns its
 cursor/selection/undo model (the foundation for multi-cursor, folding, and
 markers on the Notepad++ roadmap). For syntax highlighting, parse states are
@@ -92,26 +94,36 @@ to add cursors, Alt+drag for column/box selection, Escape to collapse; all
 cursors type/delete/paste simultaneously as one undo step), spellcheck with
 right-click suggestions, visual-row cursor navigation, undo integration for
 find/replace and plugin edits, and basic IME (caret-anchored candidate
-window, committed text insertion — no inline composition preview yet).
-Default off; the classic editor remains the default until parity. Core
-logic is unit-tested (`cargo test`).
+window, committed text insertion — no inline composition preview yet;
+the classic editor has it). Core logic is unit-tested (`cargo test`).
 
-## Plugins (Rhai scripts)
+## Plugins
 
-Notey has a Tier-1 plugin system: Rhai scripts in `%APPDATA%\Notey\scripts`
-register commands into the **Plugins** menu (with optional keyboard
-shortcuts) and can subscribe to host events (`ready`, `buffer_opened`,
-`buffer_activated`, `before_save`, `after_save`). Scripts drive the editor
-through the `notey.*` API — see [docs/plugin-api.md](docs/plugin-api.md).
-An example script (`sort_lines.rhai`, Ctrl+Alt+S) is created on first run,
-and a bundled `markdown_preview.rhai` plugin adds a raw/rendered toggle
-for Markdown tabs (Ctrl+Shift+M, or Plugins > Toggle Raw/Rendered
-Markdown — rendering via egui_commonmark).
-Plugins > Reload Scripts picks up changes without restarting.
+Notey keeps its core minimal; everything else is a plugin, managed from
+**Plugins > Manage Plugins** in three tabs:
 
-Scripts run sandboxed (no filesystem or network access) with an operation
-limit, and a failing script can never corrupt the buffer: scripts mutate a
-snapshot that is only applied back when they finish.
+- **Features** — Spellcheck, Markdown Tools (Ctrl+B/I/E/K formatting, list
+  continuation, rendered and side-by-side preview), Word Count, Autocorrect,
+  and Export & Print (HTML export, formatted printing via your browser).
+- **Languages** — one spellcheck dictionary each (16 available: English
+  variants, Spanish, French, German, Italian, Portuguese, Dutch, Polish,
+  Swedish, Danish, Russian, Ukrainian). A word is accepted if any enabled
+  language knows it; "Add to dictionary" words are saved permanently.
+- **File Types** — syntax highlighting, one plugin per file type (45
+  available). Open a file Notey doesn't recognize and the status bar offers
+  the matching plugin.
+
+Official plugins download from this repo's [`plugins/`](plugins/) folder
+and are checksum-verified before install. The installer includes a default
+set (Spellcheck, English (US), Markdown Tools, Word Count, and common file
+types), so everything works offline out of the box.
+
+You can also write your own Rhai scripts in `%APPDATA%\Notey\scripts`;
+they appear in the Plugins menu (Plugins > Reload Scripts picks up
+changes). See [docs/plugin-api.md](docs/plugin-api.md). Scripts can't
+touch files or the network unless they declare a permission, and a
+failing script can never corrupt the buffer: scripts edit a snapshot that
+is only applied when they finish.
 
 ## Installer
 

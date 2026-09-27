@@ -174,22 +174,16 @@ impl PluginManager {
         self.syntax_rx = Some(rx);
     }
 
-    /// Entry scripts of enabled feature plugins.
-    pub fn feature_scripts(&self) -> Vec<(String, PathBuf)> {
+    /// Entry scripts of enabled feature plugins, with the permissions each
+    /// package grants (shown to the user in the Plugins window).
+    pub fn feature_scripts(&self) -> Vec<(PathBuf, Vec<String>)> {
         self.store
             .enabled(Kind::Feature)
-            .filter_map(|p| Some((p.manifest.id.clone(), p.file(p.manifest.script.as_ref()?))))
+            .filter_map(|p| {
+                let script = p.file(p.manifest.script.as_ref()?);
+                Some((script, p.manifest.capabilities.clone()))
+            })
             .collect()
-    }
-
-    /// Capabilities granted to an installed feature plugin's script.
-    pub fn capabilities(&self, script: &Path) -> Vec<String> {
-        self.store
-            .installed
-            .iter()
-            .find(|p| script.starts_with(&p.dir))
-            .map(|p| p.manifest.capabilities.clone())
-            .unwrap_or_default()
     }
 
     /// Reload whatever a change to a plugin of `kind` affects.

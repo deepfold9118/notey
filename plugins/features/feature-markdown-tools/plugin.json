@@ -2,8 +2,8 @@
   "id": "feature-markdown-tools",
   "kind": "feature",
   "name": "Markdown Tools",
-  "version": "1.0.0",
-  "description": "Rendered view for Markdown tabs (Ctrl+Shift+M).",
+  "version": "2.0.0",
+  "description": "Bold, italic, code and link shortcuts (Ctrl+B/I/E/K), list continuation on Enter, rendered view (Ctrl+Shift+M) and side-by-side preview (Ctrl+Alt+M) for Markdown tabs.",
   "license": "Apache-2.0",
   "script": "main.rhai",
   "files": ["main.rhai"]

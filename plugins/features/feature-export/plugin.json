@@ -1,0 +1,11 @@
+{
+  "id": "feature-export",
+  "kind": "feature",
+  "name": "Export & Print",
+  "version": "1.0.0",
+  "description": "Export the current tab as HTML (Markdown is rendered), or print it formatted through your browser, which can also save as PDF.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "capabilities": ["fs.write", "open"],
+  "files": ["main.rhai"]
+}

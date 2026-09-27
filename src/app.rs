@@ -82,6 +82,17 @@ pub struct NoteyApp {
     /// Tabs currently showing the rendered Markdown view instead of the
     /// editor (session-transient, keyed by document id).
     md_rendered: std::collections::HashSet<u64>,
+    /// Tabs showing a rendered preview beside the editor.
+    md_split: std::collections::HashSet<u64>,
+    /// Plugin status bar items: (key, text, tooltip), in insertion order.
+    status_items: Vec<(String, String, String)>,
+    /// Throttled change tracking for plugin events.
+    text_changed_pending: bool,
+    last_text_event: f64,
+    last_selection: Option<(u64, (usize, usize))>,
+    /// Text typed last frame, delivered as an `input` event this frame
+    /// (after the editor has inserted it).
+    pending_input: String,
     md_cache: egui_commonmark::CommonMarkCache,
     font_size: f32,
     editor_font: String,
@@ -164,6 +175,12 @@ impl NoteyApp {
         is_primary: bool,
     ) -> Self {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        // Accessibility normally switches on only when a screen reader or
+        // other UI Automation client queries the window; this forces it on
+        // for testing that the widget tree stays valid.
+        if std::env::var_os("NOTEY_ACCESSKIT").is_some() {
+            cc.egui_ctx.enable_accesskit();
+        }
 
         let mut app = Self {
             docs: Vec::new(),
@@ -182,9 +199,15 @@ impl NoteyApp {
             word_wrap: true,
             show_status: true,
             show_menu: false,
-            preview_editor: false,
+            preview_editor: true,
             editor_states: HashMap::new(),
             md_rendered: std::collections::HashSet::new(),
+            md_split: std::collections::HashSet::new(),
+            status_items: Vec::new(),
+            text_changed_pending: false,
+            last_text_event: 0.0,
+            last_selection: None,
+            pending_input: String::new(),
             md_cache: egui_commonmark::CommonMarkCache::default(),
             font_size: 15.0,
             editor_font: "Consolas".to_string(),
@@ -265,7 +288,9 @@ impl NoteyApp {
             app.spell_enabled = get_bool("spell", true);
             app.show_line_numbers = get_bool("line_numbers", false);
             app.show_menu = get_bool("show_menu", false);
-            app.preview_editor = get_bool("preview_editor", false);
+            // New key: the virtualized editor became the default in 0.4.0, so
+            // the "off" saved while it was opt-in is deliberately ignored once.
+            app.preview_editor = get_bool("editor_virtualized", true);
             if let Some(v) = storage.get_string("font_size").and_then(|v| v.parse().ok()) {
                 app.font_size = v;
             }
@@ -716,13 +741,60 @@ impl NoteyApp {
                 .unwrap_or_default(),
             actions: Vec::new(),
             status: None,
+            preview: self.preview_mode(doc.id).to_string(),
+            script_name: String::new(),
+            capabilities: Vec::new(),
         }
+    }
+
+    fn preview_mode(&self, id: u64) -> &'static str {
+        if self.md_rendered.contains(&id) {
+            "rendered"
+        } else if self.md_split.contains(&id) {
+            "split"
+        } else {
+            "off"
+        }
+    }
+
+    fn set_preview_mode(&mut self, mode: &str) {
+        let id = self.docs[self.active].id;
+        self.md_rendered.remove(&id);
+        self.md_split.remove(&id);
+        match mode {
+            "rendered" => {
+                self.md_rendered.insert(id);
+            }
+            "split" => {
+                self.md_split.insert(id);
+                self.focus_editor = true;
+            }
+            _ => self.focus_editor = true,
+        }
+    }
+
+    /// Apply a script's new text as the smallest single replacement, so
+    /// undo, scroll position and other cursors are disturbed as little as
+    /// possible.
+    fn apply_text_diff(&mut self, ctx: &egui::Context, new_text: &str) {
+        let old: Vec<char> = self.docs[self.active].text.chars().collect();
+        let new: Vec<char> = new_text.chars().collect();
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let max_suffix = old.len().min(new.len()) - prefix;
+        let suffix = old
+            .iter()
+            .rev()
+            .zip(new.iter().rev())
+            .take(max_suffix)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let insert: String = new[prefix..new.len() - suffix].iter().collect();
+        self.edit_text(ctx, (prefix, old.len() - suffix), &insert);
     }
 
     fn apply_script_result(&mut self, ctx: &egui::Context, out: ScriptCtx) {
         if out.text_dirty {
-            let old_n = self.docs[self.active].text.chars().count();
-            self.edit_text(ctx, (0, old_n), &out.text);
+            self.apply_text_diff(ctx, &out.text);
         }
         if out.sel_dirty {
             self.set_cursor(ctx, out.sel.0, out.sel.1);
@@ -773,6 +845,23 @@ impl NoteyApp {
                 HostAction::ToggleMarkdownPreview => {
                     self.toggle_markdown_preview();
                 }
+                HostAction::SetPreview(mode) => self.set_preview_mode(&mode),
+                HostAction::OpenPath(path) => {
+                    // default app for the file (e.g. a browser for .html)
+                    let _ = std::process::Command::new("explorer").arg(&path).spawn();
+                }
+                HostAction::SetStatusItem(key, text, tooltip) => {
+                    match self.status_items.iter_mut().find(|(k, _, _)| *k == key) {
+                        Some(item) => {
+                            item.1 = text;
+                            item.2 = tooltip;
+                        }
+                        None => self.status_items.push((key, text, tooltip)),
+                    }
+                }
+                HostAction::ClearStatusItem(key) => {
+                    self.status_items.retain(|(k, _, _)| *k != key);
+                }
             }
         }
     }
@@ -791,6 +880,7 @@ impl NoteyApp {
             self.focus_editor = true;
         } else {
             self.md_rendered.insert(id);
+            self.md_split.remove(&id);
         }
     }
 
@@ -822,7 +912,9 @@ impl NoteyApp {
                 rhai::Dynamic::from(self.docs[self.active].id as i64),
             );
             if let Some(p) = &path {
-                event.insert("path".into(), rhai::Dynamic::from(p.clone()));
+                // `input` events carry the typed text; the rest carry a path
+                let key = if kind == "input" { "text" } else { "path" };
+                event.insert(key.into(), rhai::Dynamic::from(p.clone()));
             }
             let out = self.plugin_host.run_event(idx, event, snapshot);
             self.apply_script_result(ctx, out);
@@ -869,7 +961,19 @@ impl NoteyApp {
             .cursor
             .set_char_range(Some(CCursorRange::two(CCursor::new(start), CCursor::new(end))));
         state.store(ctx, id);
-        ctx.memory_mut(|m| m.request_focus(id));
+        self.focus_drawn_editor(ctx);
+    }
+
+    /// Focus the editor, but only if it will be drawn this frame. Focusing
+    /// an id with no widget behind it (e.g. while the tab shows the rendered
+    /// Markdown view) makes egui report a phantom focused node, which
+    /// crashes accessibility clients (AccessKit validates the focus).
+    fn focus_drawn_editor(&self, ctx: &egui::Context) {
+        let doc_id = self.docs[self.active].id;
+        if !self.md_rendered.contains(&doc_id) {
+            let id = self.editor_id();
+            ctx.memory_mut(|m| m.request_focus(id));
+        }
     }
 
     fn insert_at_cursor(&mut self, ctx: &egui::Context, s: &str) {
@@ -1284,16 +1388,60 @@ impl NoteyApp {
     /// Consume manifest-declared plugin shortcuts. Must run BEFORE the
     /// built-in shortcuts: egui's `matches_logically` ignores extra pressed
     /// modifiers, so Ctrl+Alt+S would otherwise be swallowed by Ctrl+S.
+    /// Offer unmodified key presses (e.g. Enter) to scripts that registered
+    /// a key hook; a script returning true consumes the key.
+    fn handle_plugin_keys(&mut self, ctx: &egui::Context) {
+        if !ctx.memory(|m| m.has_focus(self.editor_id())) {
+            return;
+        }
+        let language = self.docs[self.active].language.clone();
+        let hooks: Vec<(usize, Key)> = self
+            .plugin_host
+            .scripts
+            .iter()
+            .enumerate()
+            .flat_map(|(i, s)| {
+                let language = language.clone();
+                s.keys
+                    .iter()
+                    .filter(move |(_, w)| w.matches(language.as_deref(), true))
+                    .map(move |(k, _)| (i, *k))
+            })
+            .collect();
+        for (i, key) in hooks {
+            let pressed = ctx.input(|inp| inp.modifiers.is_none() && inp.key_pressed(key));
+            if !pressed {
+                continue;
+            }
+            let snapshot = self.script_snapshot(ctx);
+            let (out, handled) = self.plugin_host.run_key(i, key.name(), snapshot);
+            if handled {
+                ctx.input_mut(|inp| inp.consume_key(Modifiers::NONE, key));
+            }
+            self.apply_script_result(ctx, out);
+            self.surface_plugin_errors();
+            if handled {
+                break;
+            }
+        }
+    }
+
     fn handle_plugin_shortcuts(&mut self, ctx: &egui::Context) {
+        let language = self.docs[self.active].language.clone();
+        let focused = ctx.memory(|m| m.has_focus(self.editor_id()));
         let plugin_shortcuts: Vec<(usize, String, KeyboardShortcut)> = self
             .plugin_host
             .scripts
             .iter()
             .enumerate()
             .flat_map(|(i, s)| {
-                s.commands
-                    .iter()
-                    .filter_map(move |c| c.shortcut.map(|sc| (i, c.id.clone(), sc)))
+                let language = language.clone();
+                s.commands.iter().filter_map(move |c| {
+                    c.when
+                        .matches(language.as_deref(), focused)
+                        .then_some(())
+                        .and(c.shortcut.map(|sc| (i, c.id.clone(), sc)))
+                })
             })
             .collect();
         for (i, id, sc) in plugin_shortcuts {
@@ -1447,11 +1595,18 @@ impl NoteyApp {
                 });
                 ui.checkbox(&mut self.show_status, "Status Bar");
                 let mut spell_on = self.spell_enabled;
-                if ui
-                    .add_enabled(self.spell.available(), egui::Checkbox::new(&mut spell_on, "Spellcheck"))
-                    .changed()
-                {
+                let spell_resp = ui
+                    .add_enabled(self.spell.available(), egui::Checkbox::new(&mut spell_on, "Spellcheck"));
+                if spell_resp.changed() {
                     self.spell_enabled = spell_on;
+                }
+                if self.spell.available() {
+                    spell_resp.on_hover_text(format!("Languages: {}", self.spell.locales().join(", ")));
+                } else if spell_resp
+                    .on_disabled_hover_text("Install the Spellcheck feature and a language from Plugins")
+                    .clicked()
+                {
+                    self.pm.open_at(crate::packages::Kind::Feature);
                 }
                 ui.separator();
                 ui.menu_button("Theme", |ui| {
@@ -1527,12 +1682,16 @@ impl NoteyApp {
                 }
                 ui.separator();
                 let mut run: Option<(usize, String)> = None;
+                let language = self.docs[self.active].language.clone();
                 for (i, script) in self.plugin_host.scripts.iter().enumerate() {
                     for cmd in &script.commands {
+                        // focus conditions don't apply to menu clicks
+                        let available = cmd.when.matches(language.as_deref(), true);
                         let btn = if cmd.shortcut_text.is_empty() {
-                            ui.button(&cmd.title)
+                            ui.add_enabled(available, egui::Button::new(&cmd.title))
                         } else {
-                            ui.add(
+                            ui.add_enabled(
+                                available,
                                 egui::Button::new(&cmd.title)
                                     .shortcut_text(&cmd.shortcut_text),
                             )
@@ -1546,6 +1705,7 @@ impl NoteyApp {
                             .clicked()
                         {
                             run = Some((i, cmd.id.clone()));
+                            self.focus_editor = true;
                         }
                     }
                 }
@@ -1888,6 +2048,28 @@ impl NoteyApp {
             // language changed away from Markdown: fall back to the editor
             self.md_rendered.remove(&active_id);
         }
+        if self.md_split.contains(&active_id) {
+            let text = self.docs[self.active].text.clone();
+            let fill = self.palette().editor;
+            egui::Panel::right(egui::Id::new(("md_split", active_id)))
+                .resizable(true)
+                .default_size(ui.available_width() * 0.5)
+                .min_size(160.0)
+                .frame(egui::Frame::new().fill(fill).inner_margin(egui::Margin {
+                    left: 14,
+                    right: 8,
+                    top: 4,
+                    bottom: 4,
+                }))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("md_split_scroll", active_id))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &text);
+                        });
+                });
+        }
         if self.preview_editor {
             self.preview_editor_ui(ctx, ui);
             return;
@@ -2077,6 +2259,9 @@ impl NoteyApp {
             })
             .inner;
 
+        if output.response.changed() {
+            self.text_changed_pending = true;
+        }
         if let Some(range) = selection_before_context_menu {
             let mut state =
                 egui::text_edit::TextEditState::load(ctx, editor_id).unwrap_or_default();
@@ -2166,6 +2351,10 @@ impl NoteyApp {
     }
 
     fn markdown_view(&mut self, ui: &mut egui::Ui) {
+        // the editor isn't drawn this frame; don't leave focus on a widget
+        // that no longer exists (accessibility clients reject that)
+        let editor_id = self.editor_id();
+        ui.memory_mut(|m| m.surrender_focus(editor_id));
         let mut back_to_editor = false;
         ui.horizontal(|ui| {
             ui.label(
@@ -2256,6 +2445,7 @@ impl NoteyApp {
         if result.changed {
             // char offsets are stale after edits
             self.search_marks.clear();
+            self.text_changed_pending = true;
         }
         if let Some(word) = result.add_word {
             self.spell.add_word(&word);
@@ -2266,6 +2456,7 @@ impl NoteyApp {
     /// Replace a char range in the active document, routing through the
     /// preview editor's undo stack when it is active.
     fn edit_text(&mut self, ctx: &egui::Context, range: (usize, usize), s: &str) {
+        self.text_changed_pending = true;
         if self.preview_editor {
             let now = ctx.input(|i| i.time);
             let doc = &mut self.docs[self.active];
@@ -2290,6 +2481,48 @@ impl NoteyApp {
         doc.touch();
         if let Some(state) = self.editor_states.get_mut(&doc.id) {
             state.note_external_change();
+        }
+    }
+
+    /// Turn typing, text changes and selection changes into (throttled)
+    /// plugin events. Runs at the start of the frame, after last frame's
+    /// edits have landed.
+    fn queue_change_events(&mut self, ctx: &egui::Context) {
+        if !self.pending_input.is_empty() {
+            let text = std::mem::take(&mut self.pending_input);
+            self.queued_plugin_events.push(("input".to_string(), Some(text)));
+        }
+        let focused = ctx.memory(|m| m.has_focus(self.editor_id()));
+        let typed: String = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::Text(t) => Some(t.as_str()),
+                    _ => None,
+                })
+                .collect()
+        });
+        if focused && !typed.is_empty() {
+            self.pending_input.push_str(&typed);
+        }
+        let now = ctx.input(|i| i.time);
+        let doc_id = self.docs[self.active].id;
+        let sel = self.cursor_range(ctx).unwrap_or((0, 0));
+        let fire_throttled = now - self.last_text_event > 0.25;
+        if self.text_changed_pending && fire_throttled {
+            self.text_changed_pending = false;
+            self.last_text_event = now;
+            self.queued_plugin_events.push(("text_changed".to_string(), None));
+        }
+        if self.last_selection != Some((doc_id, sel)) {
+            let first = self.last_selection.is_none();
+            self.last_selection = Some((doc_id, sel));
+            if !first {
+                self.queued_plugin_events.push(("selection_changed".to_string(), None));
+            }
+        }
+        if self.text_changed_pending {
+            ctx.request_repaint_after(std::time::Duration::from_millis(260));
         }
     }
 
@@ -2323,6 +2556,7 @@ impl NoteyApp {
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let status_items = self.status_items.clone();
         let doc = &self.docs[self.active];
         let install_hint = match (&doc.path, &doc.language) {
             (Some(path), None) => self
@@ -2397,6 +2631,13 @@ impl NoteyApp {
                 ui.label(format!("{zoom:.0}%"));
                 ui.separator();
                 ui.label(format!("{chars} characters"));
+                for (_, text, tooltip) in status_items.iter().rev() {
+                    ui.separator();
+                    let r = ui.label(text.as_str());
+                    if !tooltip.is_empty() {
+                        r.on_hover_text(tooltip.as_str());
+                    }
+                }
             });
             if let Some(enc) = new_enc {
                 self.docs[self.active].encoding = enc;
@@ -2731,11 +2972,11 @@ impl NoteyApp {
                         ui.end_row();
 
                         ui.label("Editor:");
-                        ui.checkbox(&mut self.preview_editor, "Preview editor (virtualized)")
+                        ui.checkbox(&mut self.preview_editor, "Virtualized editor")
                             .on_hover_text(
-                                "Lays out only visible lines — much faster on large files. \
-                                 Supports word wrap, spellcheck, and basic IME. Preview \
-                                 limitation: no inline IME composition preview yet.",
+                                "Lays out only visible lines, so large files stay fast, and \
+                                 adds multi-cursor and column editing. Turn off to use the \
+                                 classic editor, which shows inline IME composition.",
                             );
                         ui.end_row();
                     });
@@ -2960,8 +3201,7 @@ impl eframe::App for NoteyApp {
         // focused TextEdit picks them up this frame
         if !self.pending_events.is_empty() {
             let events = std::mem::take(&mut self.pending_events);
-            let id = self.editor_id();
-            ctx.memory_mut(|m| m.request_focus(id));
+            self.focus_drawn_editor(ctx);
             ctx.input_mut(|i| i.events.extend(events));
         }
 
@@ -3002,6 +3242,7 @@ impl eframe::App for NoteyApp {
         }
 
         if self.close_confirm.is_none() {
+            self.handle_plugin_keys(ctx);
             self.handle_plugin_shortcuts(ctx);
             self.handle_shortcuts(ctx);
         }
@@ -3022,6 +3263,7 @@ impl eframe::App for NoteyApp {
             self.fire_event(ctx, "buffer_activated", path);
         }
         self.poll_plugins(ctx);
+        self.queue_change_events(ctx);
         let queued = std::mem::take(&mut self.queued_plugin_events);
         for (kind, path) in queued {
             self.fire_event(ctx, &kind, path);
@@ -3192,7 +3434,7 @@ impl eframe::App for NoteyApp {
         storage.set_string("spell", b(self.spell_enabled));
         storage.set_string("line_numbers", b(self.show_line_numbers));
         storage.set_string("show_menu", b(self.show_menu));
-        storage.set_string("preview_editor", b(self.preview_editor));
+        storage.set_string("editor_virtualized", b(self.preview_editor));
         storage.set_string("font_size", self.font_size.to_string());
         storage.set_string("zoom", self.zoom.to_string());
         storage.set_string("line_height", self.line_height.to_string());

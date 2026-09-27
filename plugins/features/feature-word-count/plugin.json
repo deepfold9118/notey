@@ -1,0 +1,10 @@
+{
+  "id": "feature-word-count",
+  "kind": "feature",
+  "name": "Word Count",
+  "version": "1.0.0",
+  "description": "Shows the word count in the status bar (or the selection's count), with estimated reading time on hover.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "files": ["main.rhai"]
+}

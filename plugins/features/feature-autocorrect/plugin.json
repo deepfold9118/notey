@@ -1,0 +1,10 @@
+{
+  "id": "feature-autocorrect",
+  "kind": "feature",
+  "name": "Autocorrect",
+  "version": "1.0.0",
+  "description": "Fixes common typos (teh → the, recieve → receive, dont → don't) and a lone \"i\" as you type, in plain text and Markdown tabs.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "files": ["main.rhai"]
+}

@@ -277,7 +277,8 @@ pub fn install_files(
     if !safe_name(&manifest.id) {
         return Err(format!("invalid plugin id {:?}", manifest.id));
     }
-    let staging = root.join(format!(".staging-{}", manifest.id));
+    // per-process name: two Notey windows may install the same plugin at once
+    let staging = root.join(format!(".staging-{}-{}", manifest.id, std::process::id()));
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     let result = (|| {
@@ -429,7 +430,12 @@ mod tests {
         let err = install_files(&root, &m, |_| Ok(b"evil".to_vec())).unwrap_err();
         assert!(err.contains("integrity"), "{err}");
         assert!(!root.join("lang-y").exists());
-        assert!(!root.join(".staging-lang-y").exists());
+        let leftovers: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".staging-"))
+            .collect();
+        assert!(leftovers.is_empty(), "staging folder left behind");
 
         let bad = manifest("lang-z", &[("../escape.txt", b"x")]);
         assert!(install_files(&root, &bad, |_| Ok(b"x".to_vec())).is_err());

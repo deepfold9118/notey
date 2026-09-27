@@ -1,13 +1,51 @@
 {
   "plugins": [
     {
-      "description": "Rendered view for Markdown tabs (Ctrl+Shift+M).",
+      "description": "Fixes common typos (teh → the, recieve → receive, dont → don't) and a lone \"i\" as you type, in plain text and Markdown tabs.",
+      "dir": "features/feature-autocorrect",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "93af0868122ac1130ccfa06cec42e8afd41fa52e72a610204ada20a97e9fd424",
+          "size": 3618
+        }
+      ],
+      "id": "feature-autocorrect",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Autocorrect",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
+      "capabilities": [
+        "fs.write",
+        "open"
+      ],
+      "description": "Export the current tab as HTML (Markdown is rendered), or print it formatted through your browser, which can also save as PDF.",
+      "dir": "features/feature-export",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "d816544917f521dfe327b3a80b315d6016e64f7d8c671e16d1dd9429c452a01d",
+          "size": 2466
+        }
+      ],
+      "id": "feature-export",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Export & Print",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Bold, italic, code and link shortcuts (Ctrl+B/I/E/K), list continuation on Enter, rendered view (Ctrl+Shift+M) and side-by-side preview (Ctrl+Alt+M) for Markdown tabs.",
       "dir": "features/feature-markdown-tools",
       "files": [
         {
           "path": "main.rhai",
-          "sha256": "64c3e1ec6dcb372b67bafe0a026106e64ffe4e460d0f0148dd9155cf8088f566",
-          "size": 649
+          "sha256": "b8d3315c47d0ec445ca2781fce5c24688de0a76698f2de1629a6ba334e30f4bd",
+          "size": 5646
         }
       ],
       "id": "feature-markdown-tools",
@@ -15,7 +53,7 @@
       "license": "Apache-2.0",
       "name": "Markdown Tools",
       "script": "main.rhai",
-      "version": "1.0.0"
+      "version": "2.0.0"
     },
     {
       "description": "Underlines misspelled words and suggests corrections. Checks against every installed and enabled language from the Languages tab.",
@@ -32,6 +70,23 @@
       "license": "Apache-2.0",
       "name": "Spellcheck",
       "native": "spellcheck",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Shows the word count in the status bar (or the selection's count), with estimated reading time on hover.",
+      "dir": "features/feature-word-count",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "66b342e6f2c7197f67d911f20cdd3ac06309aaef33e9f4d9f05b2a122518d029",
+          "size": 1026
+        }
+      ],
+      "id": "feature-word-count",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Word Count",
+      "script": "main.rhai",
       "version": "1.0.0"
     },
     {

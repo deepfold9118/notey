@@ -1,20 +1,62 @@
-# Notey Plugin API — Design Sketch (v0)
+# Notey Plugin API
 
-> **Implementation status (July 2026):** Tier 1 (Rhai scripts) is live in
-> `src/plugins.rs`. Implemented: registration manifest (name/min_api/
-> commands/shortcuts/events), `notey.editor` text/selection subset,
-> `notey.buffers`, `notey.app` (version/config_dir/clipboard),
-> `notey.ui.status` / `alert` / `toggle_markdown_preview` (flips the
-> active Markdown tab between the raw editor and a host-rendered view —
-> used by the bundled `markdown_preview.rhai` plugin, Ctrl+Shift+M),
-> `notey.editor.language`/`set_language`,
-> `notey.editor.find`/`find_all`/`replace_all` (regex via fancy-regex),
-> and events `ready`, `buffer_opened`, `buffer_activated`, `before_save`,
-> `after_save`. Not yet implemented: `line_range`, pos/line conversions,
-> undo grouping, encoding/line-ending setters,
-> `confirm`/`prompt`/`form`/panels, `selection_changed`/`text_changed`/
-> `theme_changed` events, capabilities beyond the default grant, and the
-> WASM tier.
+> **Implementation status (September 2026, API 2):** Rhai scripts are live
+> in `src/plugins.rs`. They come from two places: your own scripts in
+> `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
+> Plugins window (see [`plugins/README.md`](../plugins/README.md)). The
+> official Markdown Tools, Word Count, Autocorrect and Export & Print
+> plugins in `plugins/features/` are working examples of everything below.
+> Not yet implemented: pos/line conversions, undo grouping,
+> encoding/line-ending setters, `confirm`/`prompt`/`form`/panels, the
+> `theme_changed` event, and the WASM tier.
+>
+> **Scope note:** `notey` is available in every function of a script,
+> including your own helper functions.
+
+## API 2 additions (quick reference)
+
+**Manifest** (returned by `register()`):
+
+```rhai
+#{
+    name: "My Plugin", version: "1.0.0", min_api: 2,
+    commands: [
+        // `when` limits a command (and its shortcut) to a language and/or
+        // to while the editor has focus
+        #{ id: "bold", title: "Bold", shortcut: "Ctrl+B",
+           when: #{ language: "Markdown", focus: "editor" } },
+    ],
+    // unmodified keys offered to on_key() before the editor sees them
+    keys: [ #{ key: "Enter", when: #{ language: "Markdown", focus: "editor" } } ],
+    events: ["ready", "input", "text_changed", "selection_changed"],
+    capabilities: ["fs.write", "open"],
+}
+```
+
+**Entry points:** `on_command(id)`, `on_event(ev)`, and `on_key(key)`,
+which returns `true` to consume the key.
+
+**New events:** `input` (`ev.text` = what the user just typed, delivered
+after the editor inserted it), `text_changed` (throttled to ~4/s), and
+`selection_changed`.
+
+| Call | Notes |
+|---|---|
+| `notey.editor.line_range_at(pos) -> Range` | the line containing `pos` (no newline) |
+| `notey.ui.preview() -> "off"\|"rendered"\|"split"` | active tab's preview mode |
+| `notey.ui.set_preview(mode)` | host renders the tab as Markdown |
+| `notey.ui.set_status_item(id, text[, tooltip])` / `clear_status_item(id)` | status bar segment owned by the script |
+| `notey.ui.save_file_dialog(default_name) -> path` | `""` if cancelled |
+| `notey.text.word_count(s)` / `char_count(s)` | fast host implementations |
+| `notey.text.markdown_to_html(s)` | CommonMark + tables, strikethrough, task lists |
+| `notey.fs.write_text(path, s)` | needs `fs.write` |
+| `notey.app.open(path)` | opens with the default app; needs `open` |
+| `notey.app.temp_path(name) -> path` | a file in Notey's temp folder |
+
+**Permissions:** a script must declare a capability in `register()`. A
+script installed as a plugin also needs its package's `plugin.json` to
+grant it; the Plugins window shows those grants before you install. Your
+own scripts get what they declare.
 
 One API, two bindings: **Rhai scripts** (`scripts/`, hot-reloaded, sandboxed by
 construction) and **WASM plugins** (`plugins/`, wasmtime, capability-gated).

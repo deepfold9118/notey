@@ -612,7 +612,14 @@ pub fn show(
         .id_salt(editor_id.with("scroll"))
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
-            let (rect, resp) = ui.allocate_exact_size(total, Sense::click_and_drag());
+            // The interactive widget must carry `editor_id`: focus is requested
+            // under that id, and accessibility clients (AccessKit) panic if the
+            // focused id isn't a widget in the tree.
+            let (rect, _) = ui.allocate_exact_size(total, Sense::hover());
+            let resp = ui.interact(rect, editor_id, Sense::click_and_drag());
+            resp.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Editor")
+            });
             let text_x = rect.left() + gutter_w + 6.0;
             let painter = ui.painter_at(ui.clip_rect());
 

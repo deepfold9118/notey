@@ -1,5 +1,5 @@
 #define MyAppName "Notey"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.4.0"
 #define MyAppPublisher "Notey"
 #define MyAppExeName "notey.exe"
 ; extensions offered in the Open With menu
@@ -47,6 +47,7 @@ Source: "{#SourcePath}\..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Fla
 Source: "{#SourcePath}\..\plugins\index.json"; DestDir: "{app}\plugins"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\features\feature-spellcheck\*"; DestDir: "{app}\plugins\feature-spellcheck"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\features\feature-markdown-tools\*"; DestDir: "{app}\plugins\feature-markdown-tools"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\features\feature-word-count\*"; DestDir: "{app}\plugins\feature-word-count"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\languages\lang-en-us\*"; DestDir: "{app}\plugins\lang-en-us"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-markdown\*"; DestDir: "{app}\plugins\filetype-markdown"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-json\*"; DestDir: "{app}\plugins\filetype-json"; Flags: ignoreversion

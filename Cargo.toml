@@ -3,7 +3,7 @@ members = [".", "xtask"]
 
 [package]
 name = "notey"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "A native notepad with dark mode, tabs, and spellcheck"
 license = "Apache-2.0"
@@ -28,6 +28,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 url = "2"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 egui_commonmark = "0.24"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 sha2 = "0.10"
 
 [build-dependencies]
