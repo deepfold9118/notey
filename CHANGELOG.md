@@ -6,6 +6,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- License changed from MIT to Apache License 2.0. Releases up to and
+  including 0.3.0 remain available under MIT.
+
 ## [0.3.0] - 2026-09-27
 
 First public release.

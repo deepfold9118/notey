@@ -3,6 +3,7 @@ name = "notey"
 version = "0.3.0"
 edition = "2021"
 description = "A native notepad with dark mode, tabs, and spellcheck"
+license = "Apache-2.0"
 
 [dependencies]
 eframe = { version = "0.35", features = ["persistence"] }

@@ -150,7 +150,7 @@ The installer is per-user and needs no administrator rights. See
 
 ## License
 
-Notey is released under the [MIT License](LICENSE).
+Notey is licensed under the [Apache License, Version 2.0](LICENSE).
 
 The bundled en_US Hunspell dictionary (`assets/en_US.*`) is derived from
 SCOWL and is distributed under its own terms; see
