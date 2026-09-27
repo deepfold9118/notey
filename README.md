@@ -4,6 +4,8 @@ A native Rust notepad for Windows with dark mode, tabs, and spellcheck.
 Built with [egui/eframe](https://github.com/emilk/egui) and
 [spellbook](https://github.com/helix-editor/spellbook) (Hunspell-compatible).
 
+![Notey with three tabs open, showing syntax-highlighted Rust code in the dark Fluent theme](docs/screenshot.png)
+
 The UI is styled after Fluent / WinUI (Windows 11 Notepad): a frameless
 window with a custom title bar containing the tab strip and caption
 buttons, Fluent dark and light palettes (`src/theme.rs`), Segoe UI
