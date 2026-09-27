@@ -6,6 +6,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Plugins window: long descriptions ran underneath the Enabled and
+  Install/Uninstall controls; they now wrap before the controls column.
+
 ## [0.4.0] - 2026-09-27
 
 ### Added

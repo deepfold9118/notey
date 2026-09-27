@@ -412,9 +412,14 @@ impl PluginManager {
             if rows.is_empty() {
                 ui.label(RichText::new("No plugins match.").weak());
             }
+            // the controls column (Update, Enabled, Uninstall) gets a fixed
+            // width so descriptions wrap before it instead of running under it
+            const CONTROLS_W: f32 = 250.0;
+            let text_w = (ui.available_width() - CONTROLS_W).max(160.0);
             for (m, installed) in &rows {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
+                        ui.set_width(text_w);
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(&m.name).strong());
                             ui.label(RichText::new(format!("v{}", m.version)).weak().size(11.0));
