@@ -1,0 +1,10 @@
+{
+  "id": "feature-markdown-tools",
+  "kind": "feature",
+  "name": "Markdown Tools",
+  "version": "1.0.0",
+  "description": "Rendered view for Markdown tabs (Ctrl+Shift+M).",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "files": ["main.rhai"]
+}

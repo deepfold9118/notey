@@ -1,0 +1,16 @@
+{
+  "description": "Portuguese (Portugal) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "pt_PT.aff",
+    "pt_PT.dic",
+    "LICENSES.txt",
+    "README_pt_PT.txt"
+  ],
+  "id": "lang-pt-pt",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "pt_PT",
+  "name": "Portuguese (Portugal)",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/pt_PT",
+  "version": "1.0.0"
+}

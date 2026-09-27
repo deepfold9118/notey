@@ -154,6 +154,9 @@ The installer is per-user and needs no administrator rights. See
 
 Notey is licensed under the [Apache License, Version 2.0](LICENSE).
 
-The bundled en_US Hunspell dictionary (`assets/en_US.*`) is derived from
-SCOWL and is distributed under its own terms; see
-[assets/README_en_US.txt](assets/README_en_US.txt).
+Official plugins under [`plugins/`](plugins/) keep their upstream licenses,
+which ship inside each plugin: spellcheck dictionaries come from the
+[LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries)
+project, and file type grammars from
+[Sublime Text's Packages](https://github.com/sublimehq/Packages) with
+[bat](https://github.com/sharkdp/bat)'s syntect compatibility patches.

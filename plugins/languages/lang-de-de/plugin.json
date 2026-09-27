@@ -1,0 +1,21 @@
+{
+  "description": "German spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "de_DE.aff",
+    "de_DE.dic",
+    "COPYING_GPLv2",
+    "COPYING_GPLv3",
+    "COPYING_LGPL_v2.0.txt",
+    "COPYING_LGPL_v2.1.txt",
+    "COPYING_OASIS.txt",
+    "README_de_DE_frami.txt",
+    "README_extension_owner.txt"
+  ],
+  "id": "lang-de-de",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "de_DE",
+  "name": "German",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/de",
+  "version": "1.0.0"
+}

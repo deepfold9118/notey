@@ -1,0 +1,10 @@
+{
+  "id": "feature-spellcheck",
+  "kind": "feature",
+  "name": "Spellcheck",
+  "version": "1.0.0",
+  "description": "Underlines misspelled words and suggests corrections. Checks against every installed and enabled language from the Languages tab.",
+  "license": "Apache-2.0",
+  "native": "spellcheck",
+  "files": ["README.md"]
+}

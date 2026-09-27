@@ -1,0 +1,23 @@
+{
+  "description": "Syntax highlighting for OCaml.",
+  "extensions": [
+    "ml",
+    "mli",
+    "mll",
+    "mly"
+  ],
+  "files": [
+    "OCaml.sublime-syntax",
+    "OCamllex.sublime-syntax",
+    "OCamlyacc.sublime-syntax",
+    "camlp4.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-ocaml",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "OCaml",
+  "recommends": [],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/OCaml",
+  "version": "1.0.0"
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Syntax highlighting for ActionScript.",
+  "extensions": [
+    "as"
+  ],
+  "files": [
+    "ActionScript.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-actionscript",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "ActionScript",
+  "recommends": [],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/ActionScript",
+  "version": "1.0.0"
+}

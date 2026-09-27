@@ -1,0 +1,15 @@
+{
+  "description": "Italian spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "it_IT.aff",
+    "it_IT.dic",
+    "README_it_IT.txt"
+  ],
+  "id": "lang-it-it",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "it_IT",
+  "name": "Italian",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/it_IT",
+  "version": "1.0.0"
+}

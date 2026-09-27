@@ -35,8 +35,31 @@ Name: "contextmenu"; Description: "Add ""Open with Notey"" to the right-click me
 Name: "addtopath"; Description: "Add Notey to the user PATH"; Flags: checkedonce
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
+[InstallDelete]
+; refresh the bundled default plugins on upgrade
+Type: filesandordirs; Name: "{app}\plugins"
+
 [Files]
 Source: "{#SourcePath}\..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; Default plugins, seeded into the user's plugin store on first run.
+; Everything else is downloaded from the Plugins window.
+Source: "{#SourcePath}\..\plugins\index.json"; DestDir: "{app}\plugins"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\features\feature-spellcheck\*"; DestDir: "{app}\plugins\feature-spellcheck"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\features\feature-markdown-tools\*"; DestDir: "{app}\plugins\feature-markdown-tools"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\languages\lang-en-us\*"; DestDir: "{app}\plugins\lang-en-us"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-markdown\*"; DestDir: "{app}\plugins\filetype-markdown"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-json\*"; DestDir: "{app}\plugins\filetype-json"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-xml\*"; DestDir: "{app}\plugins\filetype-xml"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-yaml\*"; DestDir: "{app}\plugins\filetype-yaml"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-html\*"; DestDir: "{app}\plugins\filetype-html"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-css\*"; DestDir: "{app}\plugins\filetype-css"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-javascript\*"; DestDir: "{app}\plugins\filetype-javascript"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-python\*"; DestDir: "{app}\plugins\filetype-python"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-batch-file\*"; DestDir: "{app}\plugins\filetype-batch-file"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-shellscript\*"; DestDir: "{app}\plugins\filetype-shellscript"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-sql\*"; DestDir: "{app}\plugins\filetype-sql"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-diff\*"; DestDir: "{app}\plugins\filetype-diff"; Flags: ignoreversion
 
 [Icons]
 Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -88,21 +88,24 @@ impl PluginHost {
         })
     }
 
-    pub fn load() -> Self {
+    /// Load the user's own scripts plus the entry scripts of enabled
+    /// feature plugins (`(plugin id, script path)`).
+    pub fn load(feature_scripts: &[(String, PathBuf)]) -> Self {
         let mut host = Self::default();
-        let Some(dir) = Self::scripts_dir() else {
-            return host;
-        };
-        let _ = std::fs::create_dir_all(&dir);
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return host;
-        };
-        let mut paths: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p.extension().map(|e| e == "rhai").unwrap_or(false))
-            .collect();
+        let mut paths: Vec<PathBuf> = Vec::new();
+        if let Some(dir) = Self::scripts_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                paths.extend(
+                    entries
+                        .filter_map(Result::ok)
+                        .map(|e| e.path())
+                        .filter(|p| p.extension().map(|e| e == "rhai").unwrap_or(false)),
+                );
+            }
+        }
         paths.sort();
+        paths.extend(feature_scripts.iter().map(|(_, p)| p.clone()));
         for path in paths {
             match Self::load_script(&path) {
                 Ok(script) => host.scripts.push(script),
@@ -252,15 +255,21 @@ fn join(parts, sep) {
     /// already got (or edited) one. Unlike `seed_examples`, this runs even
     /// when other scripts exist, so existing installs pick it up — but it
     /// never overwrites a present file.
-    pub fn seed_markdown_plugin() {
+    /// Earlier versions seeded `markdown_preview.rhai` into the scripts
+    /// folder; it is now the official Markdown Tools plugin. Remove the old
+    /// copy so its shortcut isn't registered twice — but only if the user
+    /// never edited it.
+    pub fn remove_legacy_markdown_script() {
         let Some(dir) = Self::scripts_dir() else { return };
-        let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("markdown_preview.rhai");
-        if path.exists() {
-            return;
+        let unmodified = std::fs::read_to_string(&path)
+            .map(|s| s.replace("\r\n", "\n") == LEGACY_MARKDOWN_SCRIPT)
+            .unwrap_or(false);
+        if unmodified {
+            let _ = std::fs::remove_file(path);
         }
-        let _ = std::fs::write(&path, MARKDOWN_PREVIEW_SCRIPT);
     }
+
 
     /// Run `on_command` in the given script. Returns the mutated context.
     pub fn run_command(&mut self, script_idx: usize, cmd_id: &str, ctx: ScriptCtx) -> ScriptCtx {
@@ -329,9 +338,9 @@ fn join(parts, sep) {
     }
 }
 
-/// Bundled plugin: raw/rendered toggle for Markdown tabs. The rendering
-/// itself lives in the host (a script cannot paint); this command flips it.
-const MARKDOWN_PREVIEW_SCRIPT: &str = r#"// Notey bundled plugin: Markdown raw/rendered toggle.
+/// The script earlier versions seeded as `markdown_preview.rhai`, kept only
+/// to recognize (and remove) an unmodified legacy copy.
+const LEGACY_MARKDOWN_SCRIPT: &str = r#"// Notey bundled plugin: Markdown raw/rendered toggle.
 // Delete this file to remove the command; it will not be recreated once a
 // file with this name has existed. Docs: docs/plugin-api.md in the repo.
 
@@ -764,6 +773,13 @@ fn api_engine(_ctx: Ctx) -> Engine {
 mod tests {
     use super::*;
 
+    fn official_markdown_script() -> String {
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/features/feature-markdown-tools/main.rhai"),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn bundled_markdown_plugin_parses_and_registers() {
         let dir = std::env::temp_dir().join(format!(
@@ -772,10 +788,10 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("markdown_preview.rhai");
-        std::fs::write(&path, MARKDOWN_PREVIEW_SCRIPT).unwrap();
+        std::fs::write(&path, official_markdown_script()).unwrap();
 
         let script = PluginHost::load_script(&path).expect("bundled script loads");
-        assert_eq!(script.name, "Markdown Preview");
+        assert_eq!(script.name, "Markdown Tools");
         assert_eq!(script.commands.len(), 1);
         assert_eq!(script.commands[0].id, "toggle_md");
         assert_eq!(
@@ -795,7 +811,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("markdown_preview.rhai");
-        std::fs::write(&path, MARKDOWN_PREVIEW_SCRIPT).unwrap();
+        std::fs::write(&path, official_markdown_script()).unwrap();
         let script = PluginHost::load_script(&path).expect("loads");
         let mut host = PluginHost {
             scripts: vec![script],

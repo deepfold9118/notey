@@ -1,0 +1,24 @@
+{
+  "description": "Syntax highlighting for R.",
+  "extensions": [
+    "R",
+    "Rprofile",
+    "r",
+    "rd"
+  ],
+  "files": [
+    "R Console.sublime-syntax",
+    "R.sublime-syntax",
+    "Rd (R Documentation).sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-r",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "R",
+  "recommends": [
+    "filetype-latex"
+  ],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/R",
+  "version": "1.0.0"
+}

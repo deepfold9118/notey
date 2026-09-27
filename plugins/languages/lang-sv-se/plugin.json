@@ -1,0 +1,15 @@
+{
+  "description": "Swedish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "sv_SE.aff",
+    "sv_SE.dic",
+    "LICENSE_sv_SE.txt"
+  ],
+  "id": "lang-sv-se",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "sv_SE",
+  "name": "Swedish",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/sv_SE/dictionaries",
+  "version": "1.0.0"
+}

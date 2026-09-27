@@ -4,6 +4,8 @@ mod app;
 mod doc;
 mod editor;
 mod ipc;
+mod packages;
+mod plugin_manager;
 mod plugins;
 mod search;
 mod session;

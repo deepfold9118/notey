@@ -1709,6 +1709,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn syntax_colors_keep_spell_underlines() {
+        let sp = crate::spell::tests::english();
+        let line = "// this recieve is wrong";
+        let red = Color32::from_rgb(232, 82, 82);
+        let spans = [(Color32::GRAY, line.len() as u32)]; // one comment span
+        let mut job = LayoutJob::default();
+        append_highlighted_line(&mut job, line, &spans, Some(&sp), &TextFormat::default(), red);
+        let underlined: Vec<&str> = job
+            .sections
+            .iter()
+            .filter(|s| s.format.underline.width > 0.0)
+            .map(|s| &line[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+        assert_eq!(underlined, ["recieve"]);
+        assert!(job.sections.iter().all(|s| s.format.color == Color32::GRAY));
+    }
+
+    #[test]
     fn gutter_uses_window_chrome_color() {
         for dark in [false, true] {
             let palette = crate::theme::palette(dark);

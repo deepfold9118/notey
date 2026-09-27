@@ -1,4 +1,10 @@
-//! Syntax highlighting for both editors, built on syntect + two-face.
+//! Syntax highlighting for both editors, built on syntect.
+//!
+//! Grammars are not compiled into Notey: each file type is a plugin that
+//! ships Sublime `.sublime-syntax` files. The app builds a `SyntaxSet` from
+//! the enabled file type plugins (in the background, with an on-disk cache)
+//! and swaps it in with [`install`]; a generation counter lets highlight
+//! caches notice the change.
 //!
 //! Highlighting is virtualization-friendly: `HlCache` snapshots the parser
 //! state at every line boundary, so only lines up to the visible bottom are
@@ -8,51 +14,110 @@
 //! stays identical to the unhighlighted layout (hit-testing relies on that).
 
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use eframe::egui::Color32;
 use syntect::highlighting::{
     HighlightState, Highlighter, HighlightIterator, Theme, ThemeSet,
 };
-use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
+use syntect::parsing::{ParseState, ScopeStack, SyntaxDefinition, SyntaxSet, SyntaxSetBuilder};
 
 pub struct Syntaxes {
     pub set: SyntaxSet,
-    pub theme_dark: Theme,
-    pub theme_light: Theme,
     /// Sorted human-visible syntax names.
     pub names: Vec<String>,
 }
 
-static GLOBAL: OnceLock<Syntaxes> = OnceLock::new();
-
-pub fn global() -> &'static Syntaxes {
-    GLOBAL.get_or_init(|| {
-        let set = two_face::syntax::extra_newlines();
-        let mut themes = ThemeSet::load_defaults();
-        let theme_dark = themes
-            .themes
-            .remove("base16-eighties.dark")
-            .unwrap_or_else(|| Theme::default());
-        let theme_light = themes
-            .themes
-            .remove("InspiredGitHub")
-            .unwrap_or_else(|| Theme::default());
+impl Syntaxes {
+    fn from_set(set: SyntaxSet) -> Self {
         let mut names: Vec<String> = set
             .syntaxes()
             .iter()
-            .filter(|s| !s.hidden)
+            .filter(|s| !s.hidden && s.name != "Plain Text")
             .map(|s| s.name.clone())
             .collect();
         names.sort_by_key(|n| n.to_lowercase());
         names.dedup();
-        Syntaxes {
-            set,
-            theme_dark,
-            theme_light,
-            names,
+        Self { set, names }
+    }
+
+    /// Plain text only: what the app has before any file type is enabled.
+    pub fn plain() -> Self {
+        let mut b = SyntaxSetBuilder::new();
+        b.add_plain_text_syntax();
+        Self::from_set(b.build())
+    }
+}
+
+pub struct Themes {
+    pub dark: Theme,
+    pub light: Theme,
+}
+
+pub fn themes() -> &'static Themes {
+    static THEMES: OnceLock<Themes> = OnceLock::new();
+    THEMES.get_or_init(|| {
+        let mut set = ThemeSet::load_defaults();
+        Themes {
+            dark: set.themes.remove("base16-eighties.dark").unwrap_or_default(),
+            light: set.themes.remove("InspiredGitHub").unwrap_or_default(),
         }
     })
+}
+
+static CURRENT: RwLock<Option<Arc<Syntaxes>>> = RwLock::new(None);
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// The grammar set built from the enabled file type plugins.
+pub fn global() -> Arc<Syntaxes> {
+    if let Some(s) = CURRENT.read().unwrap().as_ref() {
+        return Arc::clone(s);
+    }
+    let mut w = CURRENT.write().unwrap();
+    Arc::clone(w.get_or_insert_with(|| Arc::new(Syntaxes::plain())))
+}
+
+/// Bumped whenever [`install`] swaps the grammar set.
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Acquire)
+}
+
+pub fn install(s: Syntaxes) {
+    *CURRENT.write().unwrap() = Some(Arc::new(s));
+    GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Build a grammar set from `.sublime-syntax` files. `cache` is a file path
+/// keyed to exactly this set of grammars; a valid cache skips the (slow)
+/// YAML parsing. Grammars that fail to parse are skipped and reported.
+pub fn build(grammars: &[PathBuf], cache: Option<&Path>) -> (Syntaxes, Vec<String>) {
+    if let Some(path) = cache {
+        if let Ok(set) = syntect::dumps::from_dump_file::<SyntaxSet, _>(path) {
+            return (Syntaxes::from_set(set), Vec::new());
+        }
+    }
+    let mut errors = Vec::new();
+    let mut b = SyntaxSetBuilder::new();
+    b.add_plain_text_syntax();
+    for path in grammars {
+        let parsed = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|src| SyntaxDefinition::load_from_str(&src, true, None).map_err(|e| e.to_string()));
+        match parsed {
+            Ok(def) => b.add(def),
+            Err(e) => errors.push(format!(
+                "{}: {e}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )),
+        }
+    }
+    let set = b.build();
+    if let Some(path) = cache {
+        let _ = syntect::dumps::dump_to_file(&set, path);
+    }
+    (Syntaxes::from_set(set), errors)
 }
 
 /// Guess a syntax name from a file path's extension (None = plain text).
@@ -78,6 +143,8 @@ fn to_color32(c: syntect::highlighting::Color) -> Color32 {
 /// runs, plus parser-state snapshots at each line boundary.
 pub struct HlCache {
     pub syntax: String,
+    /// Grammar-set generation the cached spans were computed with.
+    generation: u64,
     source_hash: Option<u64>,
     theme_key: Option<u8>,
     /// states[i] = (parse, highlight) state BEFORE line i. len >= 1 once used.
@@ -91,6 +158,7 @@ impl HlCache {
     pub fn new(syntax: String) -> Self {
         Self {
             syntax,
+            generation: generation(),
             source_hash: None,
             theme_key: None,
             states: Vec::new(),
@@ -145,11 +213,16 @@ impl HlCache {
             self.invalidate_all();
             self.theme_key = Some(theme_key);
         }
+        let current = generation();
+        if self.generation != current {
+            self.invalidate_all(); // file type plugins changed
+            self.generation = current;
+        }
         let g = global();
         let Some(sr) = g.set.find_syntax_by_name(&self.syntax) else {
             return;
         };
-        let theme = imported_theme.unwrap_or(if dark { &g.theme_dark } else { &g.theme_light });
+        let theme = imported_theme.unwrap_or(if dark { &themes().dark } else { &themes().light });
         let highlighter = Highlighter::new(theme);
         if self.spans.len() != n_lines {
             self.spans.resize(n_lines, None);
@@ -212,11 +285,31 @@ impl HlCache {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Install the repo's official file type plugins (once per test run).
+    pub(crate) fn install_official() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/filetypes");
+            let mut grammars = Vec::new();
+            for dir in std::fs::read_dir(root).unwrap().filter_map(Result::ok) {
+                for f in std::fs::read_dir(dir.path()).unwrap().filter_map(Result::ok) {
+                    if f.path().extension().is_some_and(|e| e == "sublime-syntax") {
+                        grammars.push(f.path());
+                    }
+                }
+            }
+            let (set, errors) = build(&grammars, None);
+            assert!(errors.is_empty(), "{errors:?}");
+            install(set);
+        });
+    }
 
     #[test]
     fn detects_common_extensions() {
+        install_official();
         assert_eq!(
             detect(std::path::Path::new("x/main.rs")).as_deref(),
             Some("Rust")
@@ -231,6 +324,7 @@ mod tests {
 
     #[test]
     fn highlights_rust_line_spans_match_bytes() {
+        install_official();
         let mut hl = HlCache::new("Rust".to_string());
         let lines = ["fn main() {", "    let x = 1; // hi", "}"];
         hl.ensure(3, 3, true, None, |i| format!("{}\n", lines[i]));
@@ -243,6 +337,7 @@ mod tests {
 
     #[test]
     fn invalidation_truncates_states() {
+        install_official();
         let mut hl = HlCache::new("Rust".to_string());
         let lines = ["fn a() {}", "fn b() {}", "fn c() {}"];
         hl.ensure(3, 3, true, None, |i| format!("{}\n", lines[i]));
@@ -259,6 +354,7 @@ mod tests {
 
     #[test]
     fn source_change_invalidates_cached_spans() {
+        install_official();
         let mut hl = HlCache::new("Rust".to_string());
         hl.sync_source("fn a() {}");
         hl.ensure(1, 1, true, None, |_| "fn a() {}\n".to_string());
@@ -274,6 +370,7 @@ mod tests {
 
     #[test]
     fn imported_theme_colors_are_used() {
+        install_official();
         let mut imported = Theme::default();
         imported.settings.foreground = Some(syntect::highlighting::Color {
             r: 0x12,

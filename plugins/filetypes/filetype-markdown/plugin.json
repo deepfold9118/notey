@@ -1,0 +1,40 @@
+{
+  "description": "Syntax highlighting for Markdown.",
+  "extensions": [
+    "markdn",
+    "markdown",
+    "md",
+    "mdown"
+  ],
+  "files": [
+    "Markdown.sublime-syntax",
+    "MultiMarkdown.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-markdown",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "Markdown",
+  "recommends": [
+    "filetype-cplusplus",
+    "filetype-csharp",
+    "filetype-go",
+    "filetype-graphviz",
+    "filetype-html",
+    "filetype-java",
+    "filetype-javascript",
+    "filetype-json",
+    "filetype-objective-c",
+    "filetype-php",
+    "filetype-python",
+    "filetype-r",
+    "filetype-regular-expressions",
+    "filetype-ruby",
+    "filetype-rust",
+    "filetype-shellscript",
+    "filetype-sql",
+    "filetype-xml"
+  ],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Markdown",
+  "version": "1.0.0"
+}

@@ -1,0 +1,2285 @@
+{
+  "plugins": [
+    {
+      "description": "Rendered view for Markdown tabs (Ctrl+Shift+M).",
+      "dir": "features/feature-markdown-tools",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "64c3e1ec6dcb372b67bafe0a026106e64ffe4e460d0f0148dd9155cf8088f566",
+          "size": 649
+        }
+      ],
+      "id": "feature-markdown-tools",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Markdown Tools",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Underlines misspelled words and suggests corrections. Checks against every installed and enabled language from the Languages tab.",
+      "dir": "features/feature-spellcheck",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "f509a24c0770836ddf072dfbab291f96afd8c4087e392d210df96b5b7d0c23c2",
+          "size": 278
+        }
+      ],
+      "id": "feature-spellcheck",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Spellcheck",
+      "native": "spellcheck",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Danish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-da-dk",
+      "files": [
+        {
+          "path": "da_DK.aff",
+          "sha256": "ee4fe193d19b72aa64bc0d2b9bcdf44ee44f11d9b4e7dcf6da36fd0e91528561",
+          "size": 82864
+        },
+        {
+          "path": "da_DK.dic",
+          "sha256": "326fe1511ea8f5b98f39b90743024587117d3b6c662c428a9b7fe5b42e75c8aa",
+          "size": 3894247
+        },
+        {
+          "path": "README_da_DK.txt",
+          "sha256": "9508f4ec9e14a3d2a3360dd694881440d0d73fe1fe076e547639e5fe33c7b42d",
+          "size": 787
+        }
+      ],
+      "id": "lang-da-dk",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "da_DK",
+      "name": "Danish",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/da_DK",
+      "version": "1.0.0"
+    },
+    {
+      "description": "German spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-de-de",
+      "files": [
+        {
+          "path": "de_DE.aff",
+          "sha256": "c7a7d49f73394c8ffd189e9ebec065ad63f6a3feb15417dbf90b2dc68760227e",
+          "size": 19297
+        },
+        {
+          "path": "de_DE.dic",
+          "sha256": "98ebd2e9ff49dcac16316acaa47763768b25c378e66e8f6e5843138fe1482843",
+          "size": 4419978
+        },
+        {
+          "path": "COPYING_GPLv2",
+          "sha256": "e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89",
+          "size": 17992
+        },
+        {
+          "path": "COPYING_GPLv3",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "size": 35147
+        },
+        {
+          "path": "COPYING_LGPL_v2.0.txt",
+          "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
+          "size": 25383
+        },
+        {
+          "path": "COPYING_LGPL_v2.1.txt",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "size": 26530
+        },
+        {
+          "path": "COPYING_OASIS.txt",
+          "sha256": "2d9d81e88ecd0e837122f4688ca7a6a5bd7bb41bff6e21ff5d4663eb43372db3",
+          "size": 675
+        },
+        {
+          "path": "README_de_DE_frami.txt",
+          "sha256": "c141f4f79c428b7348b5012836f4ad3db4d124f288f15effc22696dc876512ae",
+          "size": 752
+        },
+        {
+          "path": "README_extension_owner.txt",
+          "sha256": "7662cbc363fdee12bc03a5295148587bb76923c121792a401115e654fea37b5c",
+          "size": 1444
+        }
+      ],
+      "id": "lang-de-de",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "de_DE",
+      "name": "German",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/de",
+      "version": "1.0.0"
+    },
+    {
+      "description": "English (Australia) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-en-au",
+      "files": [
+        {
+          "path": "en_AU.aff",
+          "sha256": "e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e",
+          "size": 3205
+        },
+        {
+          "path": "en_AU.dic",
+          "sha256": "aa07c46571f306b79fc1bc534357ed357af15687381b26f891ba66e8a2caed89",
+          "size": 554336
+        },
+        {
+          "path": "README.txt",
+          "sha256": "b8dd4d2ace5358adf5e6ddfac720871188e6f211cf56af97db631f4ee53e0ff3",
+          "size": 2642
+        },
+        {
+          "path": "README_en_AU.txt",
+          "sha256": "f0897dcfdf058bcfc93fbc8e7e1b5da4c27ae9e175ee3a9242e887f02eb84a8b",
+          "size": 15732
+        },
+        {
+          "path": "license.txt",
+          "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
+          "size": 15122
+        }
+      ],
+      "id": "lang-en-au",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "en_AU",
+      "name": "English (Australia)",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/en",
+      "version": "1.0.0"
+    },
+    {
+      "description": "English (Canada) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-en-ca",
+      "files": [
+        {
+          "path": "en_CA.aff",
+          "sha256": "e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e",
+          "size": 3205
+        },
+        {
+          "path": "en_CA.dic",
+          "sha256": "53096689870246a78fa408b1e7a8c49bc140bd466a84a384cfb509445fff7173",
+          "size": 551583
+        },
+        {
+          "path": "README.txt",
+          "sha256": "b8dd4d2ace5358adf5e6ddfac720871188e6f211cf56af97db631f4ee53e0ff3",
+          "size": 2642
+        },
+        {
+          "path": "README_en_CA.txt",
+          "sha256": "86700e39b2307dda4c087ad3505a1e634a5b4d518ab808c398a16d21ebe957e2",
+          "size": 15732
+        },
+        {
+          "path": "license.txt",
+          "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
+          "size": 15122
+        }
+      ],
+      "id": "lang-en-ca",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "en_CA",
+      "name": "English (Canada)",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/en",
+      "version": "1.0.0"
+    },
+    {
+      "description": "English (UK) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-en-gb",
+      "files": [
+        {
+          "path": "en_GB.aff",
+          "sha256": "0ec0f143e1644209849259d386b71214499615c3ba1501be6e95788300851d5e",
+          "size": 44155
+        },
+        {
+          "path": "en_GB.dic",
+          "sha256": "1de4577bfc06ba5650fe9bd0af4563ae50e97a793a45216686bd769f9b285316",
+          "size": 1230568
+        },
+        {
+          "path": "README.txt",
+          "sha256": "b8dd4d2ace5358adf5e6ddfac720871188e6f211cf56af97db631f4ee53e0ff3",
+          "size": 2642
+        },
+        {
+          "path": "README_en_GB.txt",
+          "sha256": "18b5833de60a52ffcb6e5b6b5048bb5a5d910acfecd5b096985b77058223880c",
+          "size": 10644
+        },
+        {
+          "path": "license.txt",
+          "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
+          "size": 15122
+        }
+      ],
+      "id": "lang-en-gb",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "en_GB",
+      "name": "English (UK)",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/en",
+      "version": "1.0.0"
+    },
+    {
+      "description": "English (US) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-en-us",
+      "files": [
+        {
+          "path": "en_US.aff",
+          "sha256": "e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e",
+          "size": 3205
+        },
+        {
+          "path": "en_US.dic",
+          "sha256": "f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647",
+          "size": 551762
+        },
+        {
+          "path": "README.txt",
+          "sha256": "b8dd4d2ace5358adf5e6ddfac720871188e6f211cf56af97db631f4ee53e0ff3",
+          "size": 2642
+        },
+        {
+          "path": "README_en_US.txt",
+          "sha256": "168b4c01cb841f766a72f310b065c04d09cff46376c37a81d799593ce751c371",
+          "size": 15732
+        },
+        {
+          "path": "license.txt",
+          "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
+          "size": 15122
+        }
+      ],
+      "id": "lang-en-us",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "en_US",
+      "name": "English (US)",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/en",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Spanish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-es-es",
+      "files": [
+        {
+          "path": "es_ES.aff",
+          "sha256": "e73a9bf8e1383f4986a5dc9e2fbed49371c0c61f511c626d15586bd433c1cad9",
+          "size": 169202
+        },
+        {
+          "path": "es_ES.dic",
+          "sha256": "6975dddec3d5d2c676069537bc67b4b5f786c65c5d4cf6703a82acf779ac9ec1",
+          "size": 715989
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "2b70fd5cb8d3b34cc6ae322c969557a2270b99017594addb2531ef5ffd9e1b17",
+          "size": 991
+        },
+        {
+          "path": "README_hunspell_es.txt",
+          "sha256": "0b5c39a863ecb61f5c5631ec1cd977667ef9bda6da6f90e80e9fc0edcbfadd97",
+          "size": 2615
+        }
+      ],
+      "id": "lang-es-es",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "es_ES",
+      "name": "Spanish",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/es",
+      "version": "1.0.0"
+    },
+    {
+      "description": "French spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-fr-fr",
+      "files": [
+        {
+          "path": "fr_FR.aff",
+          "sha256": "c176610cd5dc4846806a65ddd029f422d87978bf58f224aa44222662a16a2de5",
+          "size": 199870
+        },
+        {
+          "path": "fr_FR.dic",
+          "sha256": "b78a868e31dd6e373b6c3217969afb898a9acde828a5e7ef97308da42218c88c",
+          "size": 1236490
+        },
+        {
+          "path": "README_dict_fr.txt",
+          "sha256": "4a25abf740ad6ba5e8d0cfc0d2ffadc3c13c303f8fe389f323b061a389350f83",
+          "size": 2758
+        }
+      ],
+      "id": "lang-fr-fr",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "fr_FR",
+      "name": "French",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/fr_FR/dictionaries",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Italian spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-it-it",
+      "files": [
+        {
+          "path": "it_IT.aff",
+          "sha256": "951afaa19272f13555b8823e8bcf9ccf78f8fe1a07835bdfb912ab3e4d537c2b",
+          "size": 70054
+        },
+        {
+          "path": "it_IT.dic",
+          "sha256": "bae1e3501dcd2a923669592493b3fde6c02aae7c7aab83bf5e5b49077e73dd64",
+          "size": 1295083
+        },
+        {
+          "path": "README_it_IT.txt",
+          "sha256": "34c3e93595cf3cf5f3afc9bc0d98eea12593750383f1e82ed1d3ca29f9681283",
+          "size": 38902
+        }
+      ],
+      "id": "lang-it-it",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "it_IT",
+      "name": "Italian",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/it_IT",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Dutch spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-nl-nl",
+      "files": [
+        {
+          "path": "nl_NL.aff",
+          "sha256": "f0233d4f721f4661cf5f4d05ed2739549322bf3b6b66764b55a38257e1e16e6f",
+          "size": 46557
+        },
+        {
+          "path": "nl_NL.dic",
+          "sha256": "bc28af45307700a9927ad5719184da44dfd7eed4f707b8c1477f6d8a21b586a6",
+          "size": 2488246
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "2189c248cbc054445aeac6cd65b87eebd0a115efeb55ed498b0f2a73441805dd",
+          "size": 25820
+        },
+        {
+          "path": "README.md",
+          "sha256": "aa4685a78f32d0d24a67dd5043ef4e39acc8720c3e416fe5d201985980dbc004",
+          "size": 7824
+        }
+      ],
+      "id": "lang-nl-nl",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "nl_NL",
+      "name": "Dutch",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/nl_NL",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Polish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-pl-pl",
+      "files": [
+        {
+          "path": "pl_PL.aff",
+          "sha256": "73504f75d7cb729a85dc06bcc0f31db68bbf348b98adcfc4048ee51cc27797f7",
+          "size": 282633
+        },
+        {
+          "path": "pl_PL.dic",
+          "sha256": "e85533bd3f4dc4d34f59aa34fb7279e29f1d74a73b65b430fb594883bfd8c0af",
+          "size": 5437537
+        },
+        {
+          "path": "README_en.txt",
+          "sha256": "fb5f9b4a0643821cf88775c0932810c1cd05f236136c913e3eaf1e24806f3f44",
+          "size": 2282
+        },
+        {
+          "path": "README_pl.txt",
+          "sha256": "ce3ad7ab1d3a8b767b8f7dcc870796fbda76bc7ad8cde22f6312b0cf86a5bd11",
+          "size": 27814
+        },
+        {
+          "path": "README_pl_PL.txt",
+          "sha256": "e691ed1e79934293b0cd6996a14af1520ff893c02f920c09ed0c90aa5f0a8abc",
+          "size": 593
+        }
+      ],
+      "id": "lang-pl-pl",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "pl_PL",
+      "name": "Polish",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/pl_PL",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Portuguese (Brazil) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-pt-br",
+      "files": [
+        {
+          "path": "pt_BR.aff",
+          "sha256": "a9f3621b94eb4d6838474bf9982027758e77dcb248815f49409b1a4a477dbd27",
+          "size": 979789
+        },
+        {
+          "path": "pt_BR.dic",
+          "sha256": "32e2edd83541d58613bcc83ef731a79aadf85ed57e977a16c6b5f711a7a36cee",
+          "size": 4477692
+        },
+        {
+          "path": "README_en.txt",
+          "sha256": "bb064f3db7ba5f5536da7d079773f692c5f928822e8aebc3d78259ff6cceb9e5",
+          "size": 1461
+        },
+        {
+          "path": "README_pt_BR.txt",
+          "sha256": "9974ce691fdc1fe731717d7a2dc668244405fdc2bf9bf3367eb9b29e85177c88",
+          "size": 16348
+        }
+      ],
+      "id": "lang-pt-br",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "pt_BR",
+      "name": "Portuguese (Brazil)",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/pt_BR",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Portuguese (Portugal) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-pt-pt",
+      "files": [
+        {
+          "path": "pt_PT.aff",
+          "sha256": "975a209fcc892cb382fa5f34a28c391a39668661ce373ae071287809c5fcae24",
+          "size": 95089
+        },
+        {
+          "path": "pt_PT.dic",
+          "sha256": "e29ba2d7aa8a2ad43e9cb46ac6473064b661545c87002aea90e18899d98d3cc9",
+          "size": 1485977
+        },
+        {
+          "path": "LICENSES.txt",
+          "sha256": "d2c1cfe2e2dd81c651aec3fda5d1b4b4e7679b9e04f8cdc37586e521837384d1",
+          "size": 1830
+        },
+        {
+          "path": "README_pt_PT.txt",
+          "sha256": "36de7d88a406a4947bf646a64145f00827566808988632e3df969aa95776060c",
+          "size": 1106
+        }
+      ],
+      "id": "lang-pt-pt",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "pt_PT",
+      "name": "Portuguese (Portugal)",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/pt_PT",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Russian spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-ru-ru",
+      "files": [
+        {
+          "path": "ru_RU.aff",
+          "sha256": "38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7",
+          "size": 71236
+        },
+        {
+          "path": "ru_RU.dic",
+          "sha256": "f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc",
+          "size": 3473191
+        },
+        {
+          "path": "README_ru_RU.txt",
+          "sha256": "262af2f6ad70a61e5ee1332ff44fa8ee50edca819cf33207d8ad6ba6a0c9be52",
+          "size": 1886
+        }
+      ],
+      "id": "lang-ru-ru",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "ru_RU",
+      "name": "Russian",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/ru_RU",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Swedish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-sv-se",
+      "files": [
+        {
+          "path": "sv_SE.aff",
+          "sha256": "b721c9d44bee912feb182b601a1bc2ae3e7dffef660f4130cf2751867488a9dd",
+          "size": 18583
+        },
+        {
+          "path": "sv_SE.dic",
+          "sha256": "384a2126eff333f5f6f9790ae892554546f53948d2988c600397cb5ad6ce66e8",
+          "size": 2344202
+        },
+        {
+          "path": "LICENSE_sv_SE.txt",
+          "sha256": "841736f210169ce2c9c6907c0d88495e6d41ff7d067a3033c56ae1179ce62127",
+          "size": 353
+        }
+      ],
+      "id": "lang-sv-se",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "sv_SE",
+      "name": "Swedish",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/sv_SE/dictionaries",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Ukrainian spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+      "dir": "languages/lang-uk-ua",
+      "files": [
+        {
+          "path": "uk_UA.aff",
+          "sha256": "2219dd15e9802adebc45722c60943b1472640260491af38dd3e43b07e75585e6",
+          "size": 211759
+        },
+        {
+          "path": "uk_UA.dic",
+          "sha256": "2e5a9e67be63bdb089b3459addb5d71113319d13768e277bcae20f3cc1ad5a93",
+          "size": 8919324
+        },
+        {
+          "path": "README_uk_UA.txt",
+          "sha256": "664436fee625b4a3e712483947d1711a2f467670f4c389bcf10abca2a564e1dc",
+          "size": 362
+        }
+      ],
+      "id": "lang-uk-ua",
+      "kind": "language",
+      "license": "See the bundled README/license files",
+      "locale": "uk_UA",
+      "name": "Ukrainian",
+      "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/uk_UA",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for ActionScript.",
+      "dir": "filetypes/filetype-actionscript",
+      "extensions": [
+        "as"
+      ],
+      "files": [
+        {
+          "path": "ActionScript.sublime-syntax",
+          "sha256": "1bf0c8479a7562910786b7627667c97f537b533afeccfbfd48e5e584bc1a3aa1",
+          "size": 16363
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-actionscript",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "ActionScript",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/ActionScript",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for AppleScript.",
+      "dir": "filetypes/filetype-applescript",
+      "extensions": [
+        "applescript",
+        "script editor"
+      ],
+      "files": [
+        {
+          "path": "AppleScript.sublime-syntax",
+          "sha256": "1e359982098bbd9ad728fa92d8220a9ff74c7f241e24e6d71322f1d326dbe31c",
+          "size": 32079
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-applescript",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "AppleScript",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/AppleScript",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for ASP.",
+      "dir": "filetypes/filetype-asp",
+      "extensions": [
+        "asa",
+        "asp"
+      ],
+      "files": [
+        {
+          "path": "ASP.sublime-syntax",
+          "sha256": "8abd2897fad99b0d7f3762850f32d98f0ab1462bf1f6884a71d8709eaa1bc525",
+          "size": 29117
+        },
+        {
+          "path": "HTML-ASP.sublime-syntax",
+          "sha256": "e88706805f840c987fa5ec29b0fc0bd87e95ec621f67aa63e22de718e7f85998",
+          "size": 1582
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-asp",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "ASP",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/ASP",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Batch File.",
+      "dir": "filetypes/filetype-batch-file",
+      "extensions": [
+        "bat",
+        "cmd"
+      ],
+      "files": [
+        {
+          "path": "Batch File.sublime-syntax",
+          "sha256": "f3e583fe779aea41adf6f1ba5a62fb837854ed9a2b59dd549af7e8320eeee87b",
+          "size": 16082
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-batch-file",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Batch File",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Batch File",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Clojure.",
+      "dir": "filetypes/filetype-clojure",
+      "extensions": [
+        "clj",
+        "cljc",
+        "cljs",
+        "edn"
+      ],
+      "files": [
+        {
+          "path": "Clojure.sublime-syntax",
+          "sha256": "aad270cf65a22c8533418bf1ce98e2d390edac89067df6d2f8ce968fa89175c1",
+          "size": 11984
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-clojure",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Clojure",
+      "recommends": [
+        "filetype-regular-expressions"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Clojure",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for C++.",
+      "dir": "filetypes/filetype-cplusplus",
+      "extensions": [
+        "C",
+        "c",
+        "c++",
+        "cc",
+        "cp",
+        "cpp",
+        "cxx",
+        "h",
+        "h++",
+        "hh",
+        "hpp",
+        "hxx",
+        "inl",
+        "ipp"
+      ],
+      "files": [
+        {
+          "path": "C++.sublime-syntax",
+          "sha256": "1f68ea50771234580f023feb9b8a6355bd4096ab8f6e6c47ecb9043a69d1b671",
+          "size": 76083
+        },
+        {
+          "path": "C.sublime-syntax",
+          "sha256": "c2c3c2affbddb9fa93f654e4d124428667cd8a0e2aa73dba5dfd70d23420aa56",
+          "size": 47936
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-cplusplus",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "C++",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/C++",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for C#.",
+      "dir": "filetypes/filetype-csharp",
+      "extensions": [
+        "build",
+        "cs",
+        "csx"
+      ],
+      "files": [
+        {
+          "path": "Build.sublime-syntax",
+          "sha256": "6cda0be3d861b20763e2b12c2d8f1fca630f0e89ac08e58c6d957e5afb0c062b",
+          "size": 1677
+        },
+        {
+          "path": "C#.sublime-syntax",
+          "sha256": "2d593b3f44a580dfb790e42f651120753504e57b04318f0343484c5591340b0b",
+          "size": 68647
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-csharp",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "C#",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/C#",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for CSS.",
+      "dir": "filetypes/filetype-css",
+      "extensions": [
+        "css",
+        "css.erb",
+        "css.liquid"
+      ],
+      "files": [
+        {
+          "path": "CSS.sublime-syntax",
+          "sha256": "c3feb1b176184f868c48f049f8d3d66d447125db078d7bfdd41f5ec7ddc27d00",
+          "size": 76225
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-css",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "CSS",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/CSS",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for D.",
+      "dir": "filetypes/filetype-d",
+      "extensions": [
+        "d",
+        "di"
+      ],
+      "files": [
+        {
+          "path": "D.sublime-syntax",
+          "sha256": "4ca9fe494c7fed59dece47820f289ebda54972601e668afd336345cfb592f489",
+          "size": 73136
+        },
+        {
+          "path": "DMD Output.sublime-syntax",
+          "sha256": "33906071bd9cc54c4d7621affabc3bf093de4be9dff43f78370cf4b561a4c2db",
+          "size": 405
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-d",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "D",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/D",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Diff.",
+      "dir": "filetypes/filetype-diff",
+      "extensions": [
+        "diff",
+        "patch"
+      ],
+      "files": [
+        {
+          "path": "Diff.sublime-syntax",
+          "sha256": "804d1e10a5328b56459caf6d3ac88b619707750e3f1326e6f071bbe92364d7e9",
+          "size": 2477
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-diff",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Diff",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Diff",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Erlang.",
+      "dir": "filetypes/filetype-erlang",
+      "extensions": [
+        "Emakefile",
+        "emakefile",
+        "erl",
+        "escript",
+        "hrl",
+        "yaws"
+      ],
+      "files": [
+        {
+          "path": "Erlang.sublime-syntax",
+          "sha256": "97abf6352702f28830a0e86f7480e5c0b0e9449f384d9f65d613aa9630fb09d0",
+          "size": 71786
+        },
+        {
+          "path": "HTML (Erlang).sublime-syntax",
+          "sha256": "233accb1e4b76b4ecef99be8b0102f2b00e7d2e4de6c6c99f67bf940bac42c02",
+          "size": 1550
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-erlang",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Erlang",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Erlang",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Git Formats.",
+      "dir": "filetypes/filetype-git-formats",
+      "extensions": [
+        ".git",
+        ".gitattributes",
+        ".gitconfig",
+        ".gitignore",
+        ".gitmodules",
+        ".mailmap",
+        "COMMIT_EDITMSG",
+        "MERGE_MSG",
+        "TAG_EDITMSG",
+        "attributes",
+        "exclude",
+        "git-rebase-todo",
+        "gitattributes",
+        "gitconfig",
+        "gitignore",
+        "gitlog",
+        "mailmap"
+      ],
+      "files": [
+        {
+          "path": "Git Attributes.sublime-syntax",
+          "sha256": "529c8b48dfe09451c1c39397be5618b50bfcd6d12824d21d1a326b7e44c1687a",
+          "size": 6568
+        },
+        {
+          "path": "Git Commit.sublime-syntax",
+          "sha256": "0b973edc18cd49c53e43b63244504e647084366ab6cdc3e0282c1f8ad4be0301",
+          "size": 9282
+        },
+        {
+          "path": "Git Common.sublime-syntax",
+          "sha256": "27710920c72106f7df4a6ce27807f57e7c4d9d35d7c50628db4b9a65679b60b7",
+          "size": 13405
+        },
+        {
+          "path": "Git Config.sublime-syntax",
+          "sha256": "dca788c8104552bdbedcf975c5810fedb39bb872cdc0efabd6b865a06b29426e",
+          "size": 7566
+        },
+        {
+          "path": "Git Ignore.sublime-syntax",
+          "sha256": "60b770002ff261eb763f4cfd19fcddcd637a2d5b7b6409a3a4ed14363553dd16",
+          "size": 762
+        },
+        {
+          "path": "Git Link.sublime-syntax",
+          "sha256": "be8bd06524ab58fe9d328f72becd0d005e8ae2d7ea15414888bd25819bcab2bb",
+          "size": 1962
+        },
+        {
+          "path": "Git Log.sublime-syntax",
+          "sha256": "517ac9e12aeaf8fb6c3cf38a166a2d6e996cc1fe5f4d8b1237f8900bcec258b7",
+          "size": 1332
+        },
+        {
+          "path": "Git Mailmap.sublime-syntax",
+          "sha256": "05fa90c21b8325db68b223b0fb3babbb2245391c543931ca2608fe3ebfe1bf2c",
+          "size": 594
+        },
+        {
+          "path": "Git Rebase.sublime-syntax",
+          "sha256": "f08c84b548828b6b1b2ff97fd841c7217ea8d1d726c7ef625911b4304b3578cc",
+          "size": 5701
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-git-formats",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Git Formats",
+      "recommends": [
+        "filetype-shellscript"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Git Formats",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Go.",
+      "dir": "filetypes/filetype-go",
+      "extensions": [
+        "go"
+      ],
+      "files": [
+        {
+          "path": "Go.sublime-syntax",
+          "sha256": "376f5583ba4c4d96081bcbabc685eae2a1fdc318b5e3144859545a06bcc57278",
+          "size": 38676
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-go",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Go",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Go",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Graphviz.",
+      "dir": "filetypes/filetype-graphviz",
+      "extensions": [
+        "DOT",
+        "dot",
+        "gv"
+      ],
+      "files": [
+        {
+          "path": "DOT.sublime-syntax",
+          "sha256": "137afc7654902d52eb5f74080d006df39eeb8ca67b212fa8c641987388217f20",
+          "size": 3983
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-graphviz",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Graphviz",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Graphviz",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Groovy.",
+      "dir": "filetypes/filetype-groovy",
+      "extensions": [
+        "Jenkinsfile",
+        "gradle",
+        "groovy",
+        "gvy"
+      ],
+      "files": [
+        {
+          "path": "Groovy.sublime-syntax",
+          "sha256": "97128f78b0d24d0e79e036ca1aaf0c6873bc73b017c4bc0b431eb10acb45770b",
+          "size": 20455
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-groovy",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Groovy",
+      "recommends": [
+        "filetype-java"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Groovy",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Haskell.",
+      "dir": "filetypes/filetype-haskell",
+      "extensions": [
+        "hs",
+        "lhs"
+      ],
+      "files": [
+        {
+          "path": "Haskell.sublime-syntax",
+          "sha256": "672b59fb4b28ca09ef55e5fc9d8d91b9caab8fee7e793b5ad87f4e5d930ce307",
+          "size": 9389
+        },
+        {
+          "path": "Literate Haskell.sublime-syntax",
+          "sha256": "0a363a9316d55ad4f45cc16d474f829aab293bd97cf3028a3930e735d270077a",
+          "size": 1650
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-haskell",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Haskell",
+      "recommends": [
+        "filetype-latex"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Haskell",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for HTML.",
+      "dir": "filetypes/filetype-html",
+      "extensions": [
+        "htm",
+        "html",
+        "shtml",
+        "xhtml"
+      ],
+      "files": [
+        {
+          "path": "HTML.sublime-syntax",
+          "sha256": "ec53b0b65645c3d4b287ef48e80ec0f7c523c3f724a0a50537a32cc7126351ab",
+          "size": 23064
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-html",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "HTML",
+      "recommends": [
+        "filetype-css",
+        "filetype-javascript"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/HTML",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Java.",
+      "dir": "filetypes/filetype-java",
+      "extensions": [
+        "bsh",
+        "java",
+        "jsp",
+        "properties"
+      ],
+      "files": [
+        {
+          "path": "Java Server Pages (JSP).sublime-syntax",
+          "sha256": "387b3b12bd577a35a98d49d444e431a6aa5dffc04dcda418e07c77e7e9bf8980",
+          "size": 3164
+        },
+        {
+          "path": "Java.sublime-syntax",
+          "sha256": "380ba2681f295821ef746b8dffa9996b40e1061a2e8597000ac56f9bb752d574",
+          "size": 37211
+        },
+        {
+          "path": "JavaDoc.sublime-syntax",
+          "sha256": "eff75f16bc67419e125d592a0a747483882a00c2b65a2b7244c068668ee68b3b",
+          "size": 6824
+        },
+        {
+          "path": "JavaProperties.sublime-syntax",
+          "sha256": "8b45a5459572e1d11b96798752870b695ec2b9cbee71dd692014a0856ee618d5",
+          "size": 1214
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-java",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Java",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Java",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for JavaScript.",
+      "dir": "filetypes/filetype-javascript",
+      "extensions": [
+        "htc",
+        "js"
+      ],
+      "files": [
+        {
+          "path": "JavaScript.sublime-syntax",
+          "sha256": "c18eba221dad5b57e956571400e3cdf7dbc61aa0de7389fafa289c0b79ad5a91",
+          "size": 69340
+        },
+        {
+          "path": "Regular Expressions (JavaScript).sublime-syntax",
+          "sha256": "36c959a42a12bd732d4ea1c9e1a8eb30c511fadb84338fe65205a5bd670b0456",
+          "size": 4394
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-javascript",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "JavaScript",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/JavaScript",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for JSON.",
+      "dir": "filetypes/filetype-json",
+      "extensions": [
+        "Pipfile.lock",
+        "ipynb",
+        "json",
+        "sublime-build",
+        "sublime-color-scheme",
+        "sublime-commands",
+        "sublime-completions",
+        "sublime-keymap",
+        "sublime-macro",
+        "sublime-menu",
+        "sublime-mousemap",
+        "sublime-project",
+        "sublime-settings",
+        "sublime-theme"
+      ],
+      "files": [
+        {
+          "path": "JSON.sublime-syntax",
+          "sha256": "a56698670098e507b811a45e689ab6a64f26ec0337e41396716a4f039d4e1c2e",
+          "size": 4343
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-json",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "JSON",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/JSON",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for LaTeX.",
+      "dir": "filetypes/filetype-latex",
+      "extensions": [
+        "bib",
+        "cls",
+        "ltx",
+        "sty",
+        "tex"
+      ],
+      "files": [
+        {
+          "path": "Bibtex.sublime-syntax",
+          "sha256": "8d5a2339c94b727ad1a185274b58871d7ec9df5ca617227792e55c7fae6025da",
+          "size": 4160
+        },
+        {
+          "path": "LaTeX Log.sublime-syntax",
+          "sha256": "13b12a570a1e8e52127bd43ef3cc5fab40d3f3c03c525ea66357cf2397904b0c",
+          "size": 1503
+        },
+        {
+          "path": "LaTeX.sublime-syntax",
+          "sha256": "07d98ec566ad6c9c97df32ac29932188d78d97100635affaab9656b608253e88",
+          "size": 68780
+        },
+        {
+          "path": "TeX.sublime-syntax",
+          "sha256": "8cb31f7680e9d6f7fbf4cad62c7906aea3a3e0a1c639128c793b1921c7c4d090",
+          "size": 5568
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-latex",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "LaTeX",
+      "recommends": [
+        "filetype-cplusplus",
+        "filetype-diff",
+        "filetype-go",
+        "filetype-haskell",
+        "filetype-html",
+        "filetype-java",
+        "filetype-javascript",
+        "filetype-json",
+        "filetype-lisp",
+        "filetype-lua",
+        "filetype-objective-c",
+        "filetype-perl",
+        "filetype-php",
+        "filetype-python",
+        "filetype-r",
+        "filetype-ruby",
+        "filetype-shellscript",
+        "filetype-sql",
+        "filetype-xml",
+        "filetype-yaml"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/LaTeX",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Lisp.",
+      "dir": "filetypes/filetype-lisp",
+      "extensions": [
+        "cl",
+        "clisp",
+        "el",
+        "fasl",
+        "l",
+        "lisp",
+        "lsp",
+        "mud",
+        "scm",
+        "sld",
+        "ss"
+      ],
+      "files": [
+        {
+          "path": "Lisp.sublime-syntax",
+          "sha256": "ea7114d5b76c9be4356a39dc221a1570bca04471ba70efd4d10ccd870488fdb5",
+          "size": 61437
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-lisp",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Lisp",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Lisp",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Lua.",
+      "dir": "filetypes/filetype-lua",
+      "extensions": [
+        "lua"
+      ],
+      "files": [
+        {
+          "path": "Lua.sublime-syntax",
+          "sha256": "f74cbc20e4f35e091e9d11b2372e6900db1adea6964ffd137f81fdae57b314dd",
+          "size": 22428
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-lua",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Lua",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Lua",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Makefile.",
+      "dir": "filetypes/filetype-makefile",
+      "extensions": [
+        "GNUmakefile",
+        "Makefile",
+        "Makefile.am",
+        "Makefile.in",
+        "OCamlMakefile",
+        "mak",
+        "make",
+        "makefile",
+        "makefile.am",
+        "makefile.in",
+        "mk"
+      ],
+      "files": [
+        {
+          "path": "Make Output.sublime-syntax",
+          "sha256": "1afc0d9d889304a2b8ef9484bf4fb7515289a6245873e086edd17bfae5e48be5",
+          "size": 282
+        },
+        {
+          "path": "Makefile.sublime-syntax",
+          "sha256": "cbe2cf2be4ce95ab49056b340a3096f6a5a6918f410f1817613ac2f7161c21ea",
+          "size": 22553
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-makefile",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Makefile",
+      "recommends": [
+        "filetype-shellscript"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Makefile",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Markdown.",
+      "dir": "filetypes/filetype-markdown",
+      "extensions": [
+        "markdn",
+        "markdown",
+        "md",
+        "mdown"
+      ],
+      "files": [
+        {
+          "path": "Markdown.sublime-syntax",
+          "sha256": "af9011c1df72995b6586265b7c01f7632531f047114972d7946a69589c1753ce",
+          "size": 67263
+        },
+        {
+          "path": "MultiMarkdown.sublime-syntax",
+          "sha256": "f12b047c44f3dfbe8411b82e016d3c87e5ddfb903d9e02e3efb5c3cb3bce8064",
+          "size": 931
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-markdown",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Markdown",
+      "recommends": [
+        "filetype-cplusplus",
+        "filetype-csharp",
+        "filetype-go",
+        "filetype-graphviz",
+        "filetype-html",
+        "filetype-java",
+        "filetype-javascript",
+        "filetype-json",
+        "filetype-objective-c",
+        "filetype-php",
+        "filetype-python",
+        "filetype-r",
+        "filetype-regular-expressions",
+        "filetype-ruby",
+        "filetype-rust",
+        "filetype-shellscript",
+        "filetype-sql",
+        "filetype-xml"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Markdown",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Matlab.",
+      "dir": "filetypes/filetype-matlab",
+      "extensions": [
+        "matlab"
+      ],
+      "files": [
+        {
+          "path": "Matlab.sublime-syntax",
+          "sha256": "47d18ec86f0a9d5c0f2ae057eff9a0cd2b4a2e74de0a2a9b6711cf0bab8d2c60",
+          "size": 67223
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-matlab",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Matlab",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Matlab",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Objective-C.",
+      "dir": "filetypes/filetype-objective-c",
+      "extensions": [
+        "M",
+        "h",
+        "m",
+        "mm"
+      ],
+      "files": [
+        {
+          "path": "Objective-C++.sublime-syntax",
+          "sha256": "842dc09861755b55c5db6bf82e89fd57b14c261326128deea6a7ecf75c8b585a",
+          "size": 78525
+        },
+        {
+          "path": "Objective-C.sublime-syntax",
+          "sha256": "3c8d96fcc33a58dd742edbdae969182cbdcdaefdb1253add7ae75103383d358f",
+          "size": 82793
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-objective-c",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Objective-C",
+      "recommends": [
+        "filetype-cplusplus"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Objective-C",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for OCaml.",
+      "dir": "filetypes/filetype-ocaml",
+      "extensions": [
+        "ml",
+        "mli",
+        "mll",
+        "mly"
+      ],
+      "files": [
+        {
+          "path": "OCaml.sublime-syntax",
+          "sha256": "92803decfbeb6cffab78d6431ae2ab4189d393b50d89c4af7365ef80191c9e3e",
+          "size": 26069
+        },
+        {
+          "path": "OCamllex.sublime-syntax",
+          "sha256": "b3b32395f9777910e095fd663b4cb04a4443889c358ebd5fed759f62776e34cb",
+          "size": 5019
+        },
+        {
+          "path": "OCamlyacc.sublime-syntax",
+          "sha256": "4eef597e8d6b970be865c0b785258b5dcc83daf4f30e13b76ee2f6971ce229a2",
+          "size": 5379
+        },
+        {
+          "path": "camlp4.sublime-syntax",
+          "sha256": "6bd5edf9d81bf30c2419a774ea6b661c38d5f57632bf45f09020857a6374a2cc",
+          "size": 959
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-ocaml",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "OCaml",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/OCaml",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Pascal.",
+      "dir": "filetypes/filetype-pascal",
+      "extensions": [
+        "dpr",
+        "p",
+        "pas"
+      ],
+      "files": [
+        {
+          "path": "Pascal.sublime-syntax",
+          "sha256": "01448353a244398674aac8d2e1540e02d9d262eb7f6ba087de0c2973049981d0",
+          "size": 3225
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-pascal",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Pascal",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Pascal",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Perl.",
+      "dir": "filetypes/filetype-perl",
+      "extensions": [
+        "pc",
+        "pl",
+        "pm",
+        "pmc",
+        "pod",
+        "t"
+      ],
+      "files": [
+        {
+          "path": "Perl.sublime-syntax",
+          "sha256": "a8c11c9fc67f492ab6ab4b134514f0c622dd64f0e63a565f452efe931e9a0139",
+          "size": 61261
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-perl",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Perl",
+      "recommends": [
+        "filetype-css",
+        "filetype-html",
+        "filetype-javascript",
+        "filetype-json",
+        "filetype-regular-expressions",
+        "filetype-sql",
+        "filetype-xml"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Perl",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for PHP.",
+      "dir": "filetypes/filetype-php",
+      "extensions": [
+        "php",
+        "php3",
+        "php4",
+        "php5",
+        "php7",
+        "phps",
+        "phpt",
+        "phtml"
+      ],
+      "files": [
+        {
+          "path": "PHP Source.sublime-syntax",
+          "sha256": "c75a5bcb2625690b799cb009da0328340e3ef3a7982e6fe229eaaa820c7be004",
+          "size": 136702
+        },
+        {
+          "path": "PHP.sublime-syntax",
+          "sha256": "fd4bb2e032270b7ea937f336ebfe1440972b6fa19f050d7d5a5c9cc7d4340b46",
+          "size": 1011
+        },
+        {
+          "path": "Regular Expressions (PHP).sublime-syntax",
+          "sha256": "5184950f4334855195f1c8178f529ed33a6c89485e4d57e28531025baa812047",
+          "size": 5133
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-php",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "PHP",
+      "recommends": [
+        "filetype-css",
+        "filetype-html",
+        "filetype-javascript",
+        "filetype-json",
+        "filetype-sql",
+        "filetype-xml"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/PHP",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Python.",
+      "dir": "filetypes/filetype-python",
+      "extensions": [
+        "SConscript",
+        "SConstruct",
+        "Sconstruct",
+        "Snakefile",
+        "bazel",
+        "bzl",
+        "cpy",
+        "gyp",
+        "gypi",
+        "pxd",
+        "pxd.in",
+        "pxi",
+        "pxi.in",
+        "py",
+        "py3",
+        "pyi",
+        "pyw",
+        "pyx",
+        "pyx.in",
+        "rpy",
+        "sconstruct",
+        "vpy",
+        "wscript"
+      ],
+      "files": [
+        {
+          "path": "Python.sublime-syntax",
+          "sha256": "e3f8c3dcf428c25461a27fae3dd749fc1b0bbfa6f32660c3cf8c04e01f39374a",
+          "size": 81992
+        },
+        {
+          "path": "Regular Expressions (Python).sublime-syntax",
+          "sha256": "19f050b61462603f1cf35abd971d0c4b47d5c58cff21c44466e75e896045f6ed",
+          "size": 3698
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-python",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Python",
+      "recommends": [
+        "filetype-sql"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Python",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for R.",
+      "dir": "filetypes/filetype-r",
+      "extensions": [
+        "R",
+        "Rprofile",
+        "r",
+        "rd"
+      ],
+      "files": [
+        {
+          "path": "R Console.sublime-syntax",
+          "sha256": "37dfbd515d0e7287e0be9c5e3e6989b64d300dd6c8c633ada998e4cfe25c918b",
+          "size": 350
+        },
+        {
+          "path": "R.sublime-syntax",
+          "sha256": "c70d2d8a45babc97d2b87556b8c28b4d704f68c919619db51252dd3f2480e9fc",
+          "size": 45980
+        },
+        {
+          "path": "Rd (R Documentation).sublime-syntax",
+          "sha256": "a9d6e7905c530832675e34d3081f9deaf89c10a5dcf7371a1fa57f4f1699304c",
+          "size": 4556
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-r",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "R",
+      "recommends": [
+        "filetype-latex"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/R",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Rails.",
+      "dir": "filetypes/filetype-rails",
+      "extensions": [
+        "builder",
+        "erb",
+        "erbsql",
+        "haml",
+        "html.erb",
+        "js.erb",
+        "rails",
+        "rhtml",
+        "rxml",
+        "sass",
+        "sql.erb"
+      ],
+      "files": [
+        {
+          "path": "HTML (Rails).sublime-syntax",
+          "sha256": "06dc7f50fac151f36eef5882167869e436a474846a2a090745e83c972f223357",
+          "size": 876
+        },
+        {
+          "path": "JavaScript (Rails).sublime-syntax",
+          "sha256": "81b8949135ff3959dced4dcbb15f88b95322afc398b99ff41ff2584e217b0800",
+          "size": 679
+        },
+        {
+          "path": "Ruby Haml.sublime-syntax",
+          "sha256": "095fd549c9b80658f737ca60c17c88d9eb001ecb4242182beed89a3d9c378801",
+          "size": 2433
+        },
+        {
+          "path": "Ruby on Rails.sublime-syntax",
+          "sha256": "af40f9fc9a5116db41a16b82f98cdeeed44cec37a92c096bd57d217d450a7157",
+          "size": 6286
+        },
+        {
+          "path": "SQL (Rails).sublime-syntax",
+          "sha256": "348dfdd583d2715ca03a8da399a9e4397b50d9fe60617297aace78bd1b4cbd19",
+          "size": 405
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-rails",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Rails",
+      "recommends": [
+        "filetype-html",
+        "filetype-javascript",
+        "filetype-ruby",
+        "filetype-sql"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Rails",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Regular Expressions.",
+      "dir": "filetypes/filetype-regular-expressions",
+      "extensions": [
+        "re"
+      ],
+      "files": [
+        {
+          "path": "RegExp.sublime-syntax",
+          "sha256": "6a5d4067ea7997b79b925dd201c1e0f00c630675825e2c27921958e4c34e1338",
+          "size": 12497
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-regular-expressions",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Regular Expressions",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Regular Expressions",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for RestructuredText.",
+      "dir": "filetypes/filetype-restructuredtext",
+      "extensions": [
+        "rest",
+        "rst"
+      ],
+      "files": [
+        {
+          "path": "reStructuredText.sublime-syntax",
+          "sha256": "8684beccaf6626de714baddaeb243e4cad4038896fb167a44e03079c581d7802",
+          "size": 7858
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-restructuredtext",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "RestructuredText",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/RestructuredText",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Ruby.",
+      "dir": "filetypes/filetype-ruby",
+      "extensions": [
+        "Appfile",
+        "Appraisals",
+        "Berksfile",
+        "Brewfile",
+        "Cheffile",
+        "Deliverfile",
+        "Fastfile",
+        "Gemfile",
+        "Guardfile",
+        "Podfile",
+        "Rakefile",
+        "Rantfile",
+        "Scanfile",
+        "Snapfile",
+        "Thorfile",
+        "Vagrantfile",
+        "capfile",
+        "cgi",
+        "config.ru",
+        "fcgi",
+        "gemspec",
+        "irbrc",
+        "jbuilder",
+        "podspec",
+        "prawn",
+        "rabl",
+        "rake",
+        "rb",
+        "rbx",
+        "rjs",
+        "ruby.rail",
+        "simplecov",
+        "thor"
+      ],
+      "files": [
+        {
+          "path": "Ruby.sublime-syntax",
+          "sha256": "7e3c7013b18703378fb008c3f1e3a18ca962099fef51668cc27be917a2523fce",
+          "size": 63977
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-ruby",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Ruby",
+      "recommends": [
+        "filetype-css",
+        "filetype-html",
+        "filetype-javascript",
+        "filetype-shellscript",
+        "filetype-sql"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Ruby",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Rust.",
+      "dir": "filetypes/filetype-rust",
+      "extensions": [
+        "rs"
+      ],
+      "files": [
+        {
+          "path": "Cargo.sublime-syntax",
+          "sha256": "37647f073050257d24e627c83df180f9e72431d3d3890345710c827bdd32653b",
+          "size": 329
+        },
+        {
+          "path": "Rust.sublime-syntax",
+          "sha256": "0b01d5e3dce7da734f5382260c9edaccc704e42fe1a331274f69ce68b3398778",
+          "size": 35460
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "89807acf2309bd285f033404ee78581602f3cd9b819a16ac2f0e5f60ff4a473e",
+          "size": 1023
+        }
+      ],
+      "id": "filetype-rust",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Rust",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Rust",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Scala.",
+      "dir": "filetypes/filetype-scala",
+      "extensions": [
+        "sbt",
+        "sc",
+        "scala"
+      ],
+      "files": [
+        {
+          "path": "Scala.sublime-syntax",
+          "sha256": "7e33968ed4e111f101e425be8181e6090a0a442b62a5c6daa126eae1dda1eeed",
+          "size": 59751
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-scala",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Scala",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Scala",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for ShellScript.",
+      "dir": "filetypes/filetype-shellscript",
+      "extensions": [
+        ".bash_aliases",
+        ".bash_completions",
+        ".bash_functions",
+        ".bash_login",
+        ".bash_logout",
+        ".bash_profile",
+        ".bash_variables",
+        ".bashrc",
+        ".profile",
+        ".textmate_init",
+        ".zlogin",
+        ".zlogout",
+        ".zprofile",
+        ".zshenv",
+        ".zshrc",
+        "PKGBUILD",
+        "ash",
+        "bash",
+        "ebuild",
+        "eclass",
+        "sh",
+        "zsh"
+      ],
+      "files": [
+        {
+          "path": "Bash.sublime-syntax",
+          "sha256": "f8389d0146184628b24c6c9e90143a9631cfbfcd781593408285bf38fdaf86f4",
+          "size": 47564
+        },
+        {
+          "path": "Shell-Unix-Generic.sublime-syntax",
+          "sha256": "43f054a7935ef64e5cc3c3e45d240b1f20ec6ca60af95183479f3e3a3ac70379",
+          "size": 191
+        },
+        {
+          "path": "commands-builtin-shell-bash.sublime-syntax",
+          "sha256": "62f627569fa9fe6b158b678926dde4d2fc8918c2ed6ceb77803f5f17bae38e75",
+          "size": 44591
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-shellscript",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "ShellScript",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/ShellScript",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for SQL.",
+      "dir": "filetypes/filetype-sql",
+      "extensions": [
+        "ddl",
+        "dml",
+        "sql"
+      ],
+      "files": [
+        {
+          "path": "SQL.sublime-syntax",
+          "sha256": "ab5e65e79402262d311c34a050ae50c1d6008afefc17191d5e5edaa75671b893",
+          "size": 9097
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-sql",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "SQL",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/SQL",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for TCL.",
+      "dir": "filetypes/filetype-tcl",
+      "extensions": [
+        "adp",
+        "tcl"
+      ],
+      "files": [
+        {
+          "path": "HTML (Tcl).sublime-syntax",
+          "sha256": "bc18ee4da309652823f94f05fd80acd4214effb266c411c4e596dad607e70f38",
+          "size": 2375
+        },
+        {
+          "path": "Tcl.sublime-syntax",
+          "sha256": "549ea96500787749e28a66bad6e3e8871f2048128fd316653047c116ed2678a3",
+          "size": 15321
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-tcl",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "TCL",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/TCL",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for Textile.",
+      "dir": "filetypes/filetype-textile",
+      "extensions": [
+        "textile"
+      ],
+      "files": [
+        {
+          "path": "Textile.sublime-syntax",
+          "sha256": "ea98ee917f2745690080d32adfc388c907a1355d209a800712369a3f09b59896",
+          "size": 8288
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-textile",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "Textile",
+      "recommends": [
+        "filetype-html"
+      ],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Textile",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for XML.",
+      "dir": "filetypes/filetype-xml",
+      "extensions": [
+        "dtml",
+        "opml",
+        "rng",
+        "rss",
+        "svg",
+        "tld",
+        "xaml",
+        "xml",
+        "xsd",
+        "xslt"
+      ],
+      "files": [
+        {
+          "path": "XML.sublime-syntax",
+          "sha256": "0b33f3dbf36b05dfe4bfb014f837be0a4f5a47c04041fdf06cce988941271a81",
+          "size": 18427
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-xml",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "XML",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/XML",
+      "version": "1.0.0"
+    },
+    {
+      "description": "Syntax highlighting for YAML.",
+      "dir": "filetypes/filetype-yaml",
+      "extensions": [
+        "sublime-syntax",
+        "yaml",
+        "yml"
+      ],
+      "files": [
+        {
+          "path": "YAML.sublime-syntax",
+          "sha256": "7c772b06d253fc62ed530d4184939c30021779fe3c3922a9458de8d8103409bf",
+          "size": 20809
+        },
+        {
+          "path": "LICENSE-sublime-packages.txt",
+          "sha256": "6aa3901416905d6ed0fc6b0fcca75e6649f4066db3f610e9653d0e0049e139e7",
+          "size": 671
+        }
+      ],
+      "id": "filetype-yaml",
+      "kind": "filetype",
+      "license": "Sublime Text Packages license (see bundled license files)",
+      "name": "YAML",
+      "recommends": [],
+      "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/YAML",
+      "version": "1.0.0"
+    }
+  ],
+  "schema": 1
+}

@@ -1,0 +1,45 @@
+{
+  "description": "Syntax highlighting for LaTeX.",
+  "extensions": [
+    "bib",
+    "cls",
+    "ltx",
+    "sty",
+    "tex"
+  ],
+  "files": [
+    "Bibtex.sublime-syntax",
+    "LaTeX Log.sublime-syntax",
+    "LaTeX.sublime-syntax",
+    "TeX.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-latex",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "LaTeX",
+  "recommends": [
+    "filetype-cplusplus",
+    "filetype-diff",
+    "filetype-go",
+    "filetype-haskell",
+    "filetype-html",
+    "filetype-java",
+    "filetype-javascript",
+    "filetype-json",
+    "filetype-lisp",
+    "filetype-lua",
+    "filetype-objective-c",
+    "filetype-perl",
+    "filetype-php",
+    "filetype-python",
+    "filetype-r",
+    "filetype-ruby",
+    "filetype-shellscript",
+    "filetype-sql",
+    "filetype-xml",
+    "filetype-yaml"
+  ],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/LaTeX",
+  "version": "1.0.0"
+}

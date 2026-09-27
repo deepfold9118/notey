@@ -1,0 +1,15 @@
+{
+  "description": "Ukrainian spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "uk_UA.aff",
+    "uk_UA.dic",
+    "README_uk_UA.txt"
+  ],
+  "id": "lang-uk-ua",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "uk_UA",
+  "name": "Ukrainian",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/uk_UA",
+  "version": "1.0.0"
+}

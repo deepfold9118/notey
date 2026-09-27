@@ -1,0 +1,26 @@
+{
+  "description": "Syntax highlighting for XML.",
+  "extensions": [
+    "dtml",
+    "opml",
+    "rng",
+    "rss",
+    "svg",
+    "tld",
+    "xaml",
+    "xml",
+    "xsd",
+    "xslt"
+  ],
+  "files": [
+    "XML.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-xml",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "XML",
+  "recommends": [],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/XML",
+  "version": "1.0.0"
+}

@@ -148,6 +148,7 @@ pub struct NoteyApp {
     icon_tex: Option<egui::TextureHandle>,
 
     plugin_host: PluginHost,
+    pm: crate::plugin_manager::PluginManager,
     pending_plugin_cmds: Vec<(usize, String)>,
     queued_plugin_events: Vec<(String, Option<String>)>,
     plugin_alerts: Vec<(String, String)>,
@@ -169,7 +170,7 @@ impl NoteyApp {
             active: 0,
             next_doc_id: 1,
             next_untitled: 1,
-            spell: Spell::new(),
+            spell: Spell::empty(),
             spell_enabled: true,
             dark: true,
             custom_theme: None,
@@ -238,6 +239,7 @@ impl NoteyApp {
             is_primary,
             icon_tex: None,
             plugin_host: PluginHost::default(),
+            pm: crate::plugin_manager::PluginManager::new(),
             pending_plugin_cmds: Vec::new(),
             queued_plugin_events: Vec::new(),
             plugin_alerts: Vec::new(),
@@ -246,8 +248,11 @@ impl NoteyApp {
         };
 
         PluginHost::seed_examples();
-        PluginHost::seed_markdown_plugin();
-        app.plugin_host = PluginHost::load();
+        PluginHost::remove_legacy_markdown_script();
+        app.plugin_host = PluginHost::load(&app.pm.feature_scripts());
+        // dictionaries and grammars come from plugins; load them off-thread
+        app.pm.start_spell_load();
+        app.pm.start_syntax_build();
         app.installed_themes = crate::theme_marketplace::installed_themes();
 
         if let Some(storage) = cc.storage {
@@ -1516,6 +1521,11 @@ impl NoteyApp {
                 self.language_picker_contents(ui);
             });
             ui.menu_button("Plugins", |ui| {
+                if ui.button("Manage Plugins…").clicked() {
+                    self.pm.open_at(crate::packages::Kind::Feature);
+                    ui.close();
+                }
+                ui.separator();
                 let mut run: Option<(usize, String)> = None;
                 for (i, script) in self.plugin_host.scripts.iter().enumerate() {
                     for cmd in &script.commands {
@@ -1543,7 +1553,7 @@ impl NoteyApp {
                     ui.separator();
                 }
                 if ui.button("Reload Scripts").clicked() {
-                    self.plugin_host = PluginHost::load();
+                    self.plugin_host = PluginHost::load(&self.pm.feature_scripts());
                     let n = self.plugin_host.scripts.len();
                     self.flash(format!("Loaded {n} script(s)"));
                     self.surface_plugin_errors();
@@ -2283,8 +2293,44 @@ impl NoteyApp {
         }
     }
 
+    /// Apply finished background plugin work: new dictionaries, a new
+    /// grammar set, changed feature scripts.
+    fn poll_plugins(&mut self, ctx: &egui::Context) {
+        let poll = self.pm.poll();
+        if let Some((dicts, _)) = poll.spell {
+            self.spell = Spell::with_dictionaries(dicts, self.pm.user_dictionary_path());
+        }
+        if poll.syntaxes_installed {
+            // files opened before their file type was available
+            for doc in &mut self.docs {
+                if doc.language.is_none() {
+                    if let Some(path) = &doc.path {
+                        doc.language = crate::syntax::detect(path);
+                    }
+                }
+            }
+        }
+        if poll.features_changed {
+            self.plugin_host = PluginHost::load(&self.pm.feature_scripts());
+            self.surface_plugin_errors();
+        }
+        if let Some(msg) = poll.messages.last() {
+            self.flash(msg.clone());
+        }
+        if self.pm.is_busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let doc = &self.docs[self.active];
+        let install_hint = match (&doc.path, &doc.language) {
+            (Some(path), None) => self
+                .pm
+                .suggestion_for(path)
+                .map(|m| (m.id.clone(), m.name.clone())),
+            _ => None,
+        };
         let (line, col) = self
             .cursor_range(ui.ctx())
             .map(|(_, end)| line_col(&doc.text, end))
@@ -2299,6 +2345,16 @@ impl NoteyApp {
                 ui.label(msg.clone());
             } else {
                 ui.label(format!("Ln {line}, Col {col}"));
+                if let Some(hint) = install_hint.clone() {
+                    let (id, name) = hint;
+                    if ui
+                        .small_button(format!("Install {name} highlighting"))
+                        .on_hover_text("Install the file type plugin for this file")
+                        .clicked()
+                    {
+                        self.pm.install(&id);
+                    }
+                }
             }
             let mut new_enc: Option<Encoding> = None;
             let mut new_le: Option<LineEnding> = None;
@@ -2384,6 +2440,11 @@ impl NoteyApp {
                     }
                 }
             });
+        ui.separator();
+        if ui.button("More file types…").clicked() {
+            self.pm.open_at(crate::packages::Kind::Filetype);
+            ui.close();
+        }
         if let Some(language) = selected {
             self.docs[self.active].language = language;
             self.lang_filter.clear();
@@ -2960,6 +3021,7 @@ impl eframe::App for NoteyApp {
                 .map(|p| p.display().to_string());
             self.fire_event(ctx, "buffer_activated", path);
         }
+        self.poll_plugins(ctx);
         let queued = std::mem::take(&mut self.queued_plugin_events);
         for (kind, path) in queued {
             self.fire_event(ctx, &kind, path);
@@ -3086,6 +3148,7 @@ impl eframe::App for NoteyApp {
         self.prefs_window(ctx);
         self.about_window(ctx);
         self.fif_window(ctx);
+        self.pm.window(ctx);
         self.plugin_alert_windows(ctx);
         self.reload_modal(ctx);
         self.close_confirm_modal(ctx);

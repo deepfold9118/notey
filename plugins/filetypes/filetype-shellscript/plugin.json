@@ -1,0 +1,40 @@
+{
+  "description": "Syntax highlighting for ShellScript.",
+  "extensions": [
+    ".bash_aliases",
+    ".bash_completions",
+    ".bash_functions",
+    ".bash_login",
+    ".bash_logout",
+    ".bash_profile",
+    ".bash_variables",
+    ".bashrc",
+    ".profile",
+    ".textmate_init",
+    ".zlogin",
+    ".zlogout",
+    ".zprofile",
+    ".zshenv",
+    ".zshrc",
+    "PKGBUILD",
+    "ash",
+    "bash",
+    "ebuild",
+    "eclass",
+    "sh",
+    "zsh"
+  ],
+  "files": [
+    "Bash.sublime-syntax",
+    "Shell-Unix-Generic.sublime-syntax",
+    "commands-builtin-shell-bash.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-shellscript",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "ShellScript",
+  "recommends": [],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/ShellScript",
+  "version": "1.0.0"
+}

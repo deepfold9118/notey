@@ -1,0 +1,17 @@
+{
+  "description": "English (Canada) spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "en_CA.aff",
+    "en_CA.dic",
+    "README.txt",
+    "README_en_CA.txt",
+    "license.txt"
+  ],
+  "id": "lang-en-ca",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "en_CA",
+  "name": "English (Canada)",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/en",
+  "version": "1.0.0"
+}

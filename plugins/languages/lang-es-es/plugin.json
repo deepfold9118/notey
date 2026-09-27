@@ -1,0 +1,16 @@
+{
+  "description": "Spanish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "es_ES.aff",
+    "es_ES.dic",
+    "LICENSE.md",
+    "README_hunspell_es.txt"
+  ],
+  "id": "lang-es-es",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "es_ES",
+  "name": "Spanish",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/es",
+  "version": "1.0.0"
+}

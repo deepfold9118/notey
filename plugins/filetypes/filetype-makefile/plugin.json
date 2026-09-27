@@ -1,0 +1,30 @@
+{
+  "description": "Syntax highlighting for Makefile.",
+  "extensions": [
+    "GNUmakefile",
+    "Makefile",
+    "Makefile.am",
+    "Makefile.in",
+    "OCamlMakefile",
+    "mak",
+    "make",
+    "makefile",
+    "makefile.am",
+    "makefile.in",
+    "mk"
+  ],
+  "files": [
+    "Make Output.sublime-syntax",
+    "Makefile.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-makefile",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "Makefile",
+  "recommends": [
+    "filetype-shellscript"
+  ],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Makefile",
+  "version": "1.0.0"
+}

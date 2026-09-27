@@ -1,0 +1,2 @@
+# Plugin files are checksummed in plugins/index.json; never convert line endings.
+plugins/** -text

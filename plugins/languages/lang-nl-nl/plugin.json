@@ -1,0 +1,16 @@
+{
+  "description": "Dutch spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "nl_NL.aff",
+    "nl_NL.dic",
+    "LICENSE.txt",
+    "README.md"
+  ],
+  "id": "lang-nl-nl",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "nl_NL",
+  "name": "Dutch",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/nl_NL",
+  "version": "1.0.0"
+}

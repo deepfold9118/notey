@@ -1,0 +1,17 @@
+{
+  "description": "Polish spellcheck dictionary (Hunspell, via LibreOffice). Needs the Spellcheck plugin.",
+  "files": [
+    "pl_PL.aff",
+    "pl_PL.dic",
+    "README_en.txt",
+    "README_pl.txt",
+    "README_pl_PL.txt"
+  ],
+  "id": "lang-pl-pl",
+  "kind": "language",
+  "license": "See the bundled README/license files",
+  "locale": "pl_PL",
+  "name": "Polish",
+  "source": "https://github.com/LibreOffice/dictionaries/tree/32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4/pl_PL",
+  "version": "1.0.0"
+}

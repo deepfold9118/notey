@@ -1,0 +1,43 @@
+{
+  "description": "Syntax highlighting for Git Formats.",
+  "extensions": [
+    ".git",
+    ".gitattributes",
+    ".gitconfig",
+    ".gitignore",
+    ".gitmodules",
+    ".mailmap",
+    "COMMIT_EDITMSG",
+    "MERGE_MSG",
+    "TAG_EDITMSG",
+    "attributes",
+    "exclude",
+    "git-rebase-todo",
+    "gitattributes",
+    "gitconfig",
+    "gitignore",
+    "gitlog",
+    "mailmap"
+  ],
+  "files": [
+    "Git Attributes.sublime-syntax",
+    "Git Commit.sublime-syntax",
+    "Git Common.sublime-syntax",
+    "Git Config.sublime-syntax",
+    "Git Ignore.sublime-syntax",
+    "Git Link.sublime-syntax",
+    "Git Log.sublime-syntax",
+    "Git Mailmap.sublime-syntax",
+    "Git Rebase.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-git-formats",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "Git Formats",
+  "recommends": [
+    "filetype-shellscript"
+  ],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Git Formats",
+  "version": "1.0.0"
+}

@@ -1,0 +1,18 @@
+{
+  "description": "Syntax highlighting for Batch File.",
+  "extensions": [
+    "bat",
+    "cmd"
+  ],
+  "files": [
+    "Batch File.sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-batch-file",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "Batch File",
+  "recommends": [],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Batch File",
+  "version": "1.0.0"
+}

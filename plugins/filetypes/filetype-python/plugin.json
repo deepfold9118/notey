@@ -1,0 +1,42 @@
+{
+  "description": "Syntax highlighting for Python.",
+  "extensions": [
+    "SConscript",
+    "SConstruct",
+    "Sconstruct",
+    "Snakefile",
+    "bazel",
+    "bzl",
+    "cpy",
+    "gyp",
+    "gypi",
+    "pxd",
+    "pxd.in",
+    "pxi",
+    "pxi.in",
+    "py",
+    "py3",
+    "pyi",
+    "pyw",
+    "pyx",
+    "pyx.in",
+    "rpy",
+    "sconstruct",
+    "vpy",
+    "wscript"
+  ],
+  "files": [
+    "Python.sublime-syntax",
+    "Regular Expressions (Python).sublime-syntax",
+    "LICENSE-sublime-packages.txt"
+  ],
+  "id": "filetype-python",
+  "kind": "filetype",
+  "license": "Sublime Text Packages license (see bundled license files)",
+  "name": "Python",
+  "recommends": [
+    "filetype-sql"
+  ],
+  "source": "https://github.com/sublimehq/Packages/tree/759d6eed9b4beed87e602a23303a121c3a6c2fb3/Python",
+  "version": "1.0.0"
+}
