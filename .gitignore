@@ -1,3 +1,30 @@
+# build output
 /target
 /installer_out
 *.pdb
+
+# secrets / local environment — never commit
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+secrets.*
+credentials*
+
+# agent / assistant instruction files and local tooling state
+CLAUDE.md
+CLAUDE.local.md
+AGENT.md
+AGENTS.md
+.claude/
+.cursor/
+.aider*
+
+# editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store

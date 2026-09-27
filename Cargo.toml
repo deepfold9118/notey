@@ -1,6 +1,6 @@
 [package]
 name = "notey"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "A native notepad with dark mode, tabs, and spellcheck"
 

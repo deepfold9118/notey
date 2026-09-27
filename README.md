@@ -140,3 +140,18 @@ latest exe.
   handler via the shell Print verb.
 - The spellchecker skips words with digits, URLs/emails (heuristic), and is
   automatically disabled for files larger than 512 KB.
+
+## Download
+
+Grab `NoteySetup.exe` from the
+[latest release](https://github.com/deepfold9118/notey/releases/latest).
+The installer is per-user and needs no administrator rights. See
+[CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+
+## License
+
+Notey is released under the [MIT License](LICENSE).
+
+The bundled en_US Hunspell dictionary (`assets/en_US.*`) is derived from
+SCOWL and is distributed under its own terms; see
+[assets/README_en_US.txt](assets/README_en_US.txt).
