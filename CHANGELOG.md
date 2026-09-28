@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-27
+
 ### Fixed
 - Plugins window: long descriptions ran underneath the Enabled and
   Install/Uninstall controls; they now wrap before the controls column.
@@ -104,6 +106,7 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/deepfold9118/notey/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/deepfold9118/notey/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/deepfold9118/notey/releases/tag/v0.3.0
