@@ -34,6 +34,8 @@ pub struct Palette {
     pub accent: Color32,
     /// Text selection background.
     pub selection: Color32,
+    /// Text cursor; always contrasts with `editor`.
+    pub caret: Color32,
     /// Tab hover wash.
     pub tab_hover: Color32,
     /// Close-button hover (caption bar).
@@ -71,6 +73,7 @@ pub fn palette(dark: bool) -> Palette {
             text_weak: Color32::from_rgb(0x9D, 0x9D, 0x9D),
             accent: Color32::from_rgb(0x60, 0xCD, 0xFF),
             selection: Color32::from_rgb(0x26, 0x5C, 0x8C),
+            caret: Color32::from_rgb(0x60, 0xCD, 0xFF),
             tab_hover: Color32::from_rgb(0x2A, 0x2A, 0x2A),
             close_hover: Color32::from_rgb(0xC4, 0x2B, 0x1C),
         }
@@ -87,6 +90,7 @@ pub fn palette(dark: bool) -> Palette {
             text_weak: Color32::from_rgb(0x60, 0x60, 0x60),
             accent: Color32::from_rgb(0x00, 0x67, 0xC0),
             selection: Color32::from_rgb(0xA8, 0xCE, 0xF1),
+            caret: Color32::from_rgb(0x00, 0x67, 0xC0),
             tab_hover: Color32::from_rgb(0xEA, 0xEA, 0xEA),
             close_hover: Color32::from_rgb(0xC4, 0x2B, 0x1C),
         }
@@ -199,6 +203,11 @@ pub fn load_vscode_theme(path: &Path) -> Result<ImportedTheme, String> {
         ],
     )
     .unwrap_or(app_palette.close_hover);
+    // the theme's own cursor color; the accent (focus borders, badges) is
+    // often too dim or too close to the editor background to find a caret
+    let theme_caret = color_from_map(&raw.colors, &["editorCursor.foreground"])
+        .or_else(|| raw.syntax.settings.caret.map(syntect_to_egui));
+    app_palette.caret = readable_caret(theme_caret, app_palette.editor, app_palette.text);
 
     raw.syntax.name = raw
         .name
@@ -406,6 +415,44 @@ fn is_dark_color(color: Color32) -> bool {
         + 0.7152 * color.g() as f32
         + 0.0722 * color.b() as f32;
     luminance < 128.0
+}
+
+/// WCAG contrast ratio between two opaque colors (1.0 to 21.0).
+fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+    fn luminance(c: Color32) -> f32 {
+        let channel = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+    }
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// The caret color for an editor background: the theme's cursor color
+/// (blended over the background if translucent) when it stands out at the
+/// 3:1 contrast WCAG asks of UI indicators, otherwise the text color, and
+/// black or white as a last resort.
+fn readable_caret(theme_caret: Option<Color32>, bg: Color32, text: Color32) -> Color32 {
+    const MIN_CONTRAST: f32 = 3.0;
+    let bg = Color32::from_rgb(bg.r(), bg.g(), bg.b());
+    let over_bg = |c: Color32| {
+        let [r, g, b, a] = c.to_srgba_unmultiplied();
+        let a = a as f32 / 255.0;
+        let mix = |fg: u8, bg: u8| (fg as f32 * a + bg as f32 * (1.0 - a)).round() as u8;
+        Color32::from_rgb(mix(r, bg.r()), mix(g, bg.g()), mix(b, bg.b()))
+    };
+    theme_caret
+        .into_iter()
+        .chain([text])
+        .map(over_bg)
+        .find(|&c| contrast_ratio(c, bg) >= MIN_CONTRAST)
+        .unwrap_or(if is_dark_color(bg) { Color32::WHITE } else { Color32::BLACK })
 }
 
 fn syntect_to_egui(color: Color) -> Color32 {
@@ -692,6 +739,28 @@ mod tests {
         assert_eq!(imported.palette.chrome, Color32::from_rgb(0xee, 0xee, 0xee));
         assert_eq!(imported.syntax.scopes.len(), 2);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn caret_uses_theme_cursor_color_only_when_visible() {
+        let bg = Color32::from_rgb(0x1e, 0x1e, 0x1e);
+        let text = Color32::from_rgb(0xd4, 0xd4, 0xd4);
+        let orange = Color32::from_rgb(0xff, 0x98, 0x00);
+        assert_eq!(readable_caret(Some(orange), bg, text), orange);
+        // a cursor color nearly the background's falls back to the text color
+        let dim = Color32::from_rgb(0x2a, 0x2a, 0x30);
+        assert_eq!(readable_caret(Some(dim), bg, text), text);
+        assert_eq!(readable_caret(None, bg, text), text);
+        // translucent colors are judged as drawn, over the background
+        let faint = Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 0x10);
+        assert_eq!(readable_caret(Some(faint), bg, text), text);
+        // unreadable text too: plain white on a dark editor
+        assert_eq!(readable_caret(None, bg, bg), Color32::WHITE);
+        // Notey's own themes keep their accent caret, which is readable
+        for dark in [true, false] {
+            let p = palette(dark);
+            assert!(contrast_ratio(p.caret, p.editor) >= 3.0);
+        }
     }
 
     #[test]

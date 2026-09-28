@@ -6,6 +6,15 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-27
+
+### Fixed
+- The text cursor was nearly invisible in some imported themes (e.g.
+  Tokyo Night, Gruvbox): it used the theme's focus-border color. It now
+  uses the theme's cursor color (`editorCursor.foreground`, or the
+  `.tmTheme` caret), falling back to the text color when that doesn't
+  contrast with the editor background. The cursor is also slightly wider.
+
 ## [0.5.1] - 2026-09-27
 
 ### Fixed
@@ -119,7 +128,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/deepfold9118/notey/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/deepfold9118/notey/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/deepfold9118/notey/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/deepfold9118/notey/compare/v0.4.0...v0.4.1

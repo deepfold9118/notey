@@ -519,7 +519,7 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
         text: p.text,
         weak: p.text_weak,
         selection: p.selection,
-        caret: p.accent,
+        caret: p.caret,
         current_line: if dark {
             Color32::from_rgba_unmultiplied(255, 255, 255, 5)
         } else {
@@ -1014,7 +1014,7 @@ pub fn show(
                             painter.rect_filled(
                                 egui::Rect::from_min_size(
                                     egui::pos2(text_x + r.left(), y + r.top() + 2.0),
-                                    egui::vec2(1.5, row_h - 4.0),
+                                    egui::vec2(2.0, row_h - 4.0),
                                 ),
                                 0.0,
                                 th.caret,
