@@ -645,6 +645,21 @@ pub fn show(
                 ui.memory_mut(|m| m.request_focus(editor_id));
             }
             let focused = ui.memory(|m| m.has_focus(editor_id));
+            if focused {
+                // Without this, egui treats arrows and Tab as focus navigation
+                // and Escape as "drop focus", so the caret would vanish.
+                ui.memory_mut(|m| {
+                    m.set_focus_lock_filter(
+                        editor_id,
+                        egui::EventFilter {
+                            tab: true,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            escape: true,
+                        },
+                    )
+                });
+            }
 
             // capture the misspelled word under a right-click for the menu
             if resp.secondary_clicked() {
@@ -1781,6 +1796,41 @@ mod tests {
         assert_eq!(pieces, ["a", "-", ">", "b !", "= c", "; f", "ine مرحبا"]);
         assert_eq!(job.sections[0].leading_space, 4.0);
         assert!(job.sections[1..].iter().all(|s| s.leading_space == 0.0));
+    }
+
+    #[test]
+    fn navigation_keys_keep_editor_focus() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("editor");
+        let th = theme_from_palette(&crate::theme::palette(true), FontId::monospace(14.0), 18.0, true);
+        let mut text = String::from("one\ntwo\nthree");
+        let mut state = EditorState::default();
+        let mut frame = |events: Vec<egui::Event>, focus: bool| {
+            let input = egui::RawInput {
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let _ = ui.button("another focusable widget");
+                show(ui, id, &mut text, 0, &mut state, &th, false, true, None, &[], focus, None);
+            });
+        };
+        frame(vec![], true);
+        frame(vec![], false);
+        assert!(ctx.memory(|m| m.has_focus(id)));
+        for key in [egui::Key::ArrowDown, egui::Key::ArrowUp, egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::Tab, egui::Key::Escape] {
+            let press = egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            };
+            frame(vec![press], false);
+            frame(vec![], false);
+            assert!(ctx.memory(|m| m.has_focus(id)), "{key:?} took focus from the editor");
+        }
     }
 
     #[test]
