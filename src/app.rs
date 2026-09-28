@@ -99,6 +99,7 @@ pub struct NoteyApp {
     line_height: f32, // multiplier, 1.0 = font default
     tab_size: f32,    // in space widths
     show_line_numbers: bool,
+    ligatures: bool,
     zoom: f32, // percent
 
     prefs_open: bool,
@@ -214,6 +215,7 @@ impl NoteyApp {
             line_height: 1.0,
             tab_size: 4.0,
             show_line_numbers: false,
+            ligatures: true,
             zoom: 100.0,
             prefs_open: false,
             font_list: None,
@@ -287,6 +289,7 @@ impl NoteyApp {
             app.show_status = get_bool("show_status", true);
             app.spell_enabled = get_bool("spell", true);
             app.show_line_numbers = get_bool("line_numbers", false);
+            app.ligatures = get_bool("ligatures", true);
             app.show_menu = get_bool("show_menu", false);
             // New key: the virtualized editor became the default in 0.4.0, so
             // the "off" saved while it was opt-in is deliberately ignored once.
@@ -2087,6 +2090,7 @@ impl NoteyApp {
             && self.spell.available()
             && self.docs[self.active].text.len() < 512 * 1024;
         let word_wrap = self.word_wrap;
+        let ligatures = self.ligatures;
         let editor_id = self.editor_id();
         let doc_id = self.docs[self.active].id;
         let language = self.docs[self.active].language.clone();
@@ -2173,6 +2177,9 @@ impl NoteyApp {
                         job.append("\n", 0.0, normal.clone());
                     }
                 }
+                if !ligatures {
+                    editor::break_ligatures(&mut job);
+                }
                 return ui.fonts_mut(|f| f.layout_job(job));
             }
             if !spell_on {
@@ -2183,6 +2190,9 @@ impl NoteyApp {
                     ..normal.clone()
                 };
                 append_spellchecked(&mut job, text, spell, &normal, &bad);
+            }
+            if !ligatures {
+                editor::break_ligatures(&mut job);
             }
             ui.fonts_mut(|f| f.layout_job(job))
         };
@@ -2393,7 +2403,8 @@ impl NoteyApp {
         let base_row = ui.fonts_mut(|f| f.row_height(&font));
         let row_h = base_row * self.line_height.max(0.5);
         let p = self.palette();
-        let th = editor::theme_from_palette(&p, font, row_h, self.dark);
+        let mut th = editor::theme_from_palette(&p, font, row_h, self.dark);
+        th.ligatures = self.ligatures;
         let spell_on = self.spell_enabled
             && self.spell.available()
             && self.docs[self.active].text.len() < 4 * 1024 * 1024;
@@ -2950,6 +2961,15 @@ impl NoteyApp {
                         ui.checkbox(&mut self.word_wrap, "Wrap long lines");
                         ui.end_row();
 
+                        ui.label("Ligatures:");
+                        ui.checkbox(&mut self.ligatures, "Use font ligatures")
+                            .on_hover_text(
+                                "Lets fonts such as Cascadia Code or Fira Code join characters \
+                                 like -> and != into single symbols. Has no effect on fonts \
+                                 without ligatures, such as Consolas.",
+                            );
+                        ui.end_row();
+
                         ui.label("Autosave:");
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.autosave, "Save files every");
@@ -2990,6 +3010,7 @@ impl NoteyApp {
                             tab_size_changed = true;
                         }
                         self.show_line_numbers = false;
+                        self.ligatures = true;
                         self.word_wrap = true;
                         self.show_menu = false;
                         self.autosave = false;
@@ -3433,6 +3454,7 @@ impl eframe::App for NoteyApp {
         storage.set_string("show_status", b(self.show_status));
         storage.set_string("spell", b(self.spell_enabled));
         storage.set_string("line_numbers", b(self.show_line_numbers));
+        storage.set_string("ligatures", b(self.ligatures));
         storage.set_string("show_menu", b(self.show_menu));
         storage.set_string("editor_virtualized", b(self.preview_editor));
         storage.set_string("font_size", self.font_size.to_string());

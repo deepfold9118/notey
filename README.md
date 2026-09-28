@@ -64,8 +64,8 @@ starts. Closing an individual tab still prompts to save. Secondary
   background directory grep respecting .gitignore, with a results panel
   and click-to-open at the matching line
 - **Preferences** (Edit > Preferences): font picker (all installed system
-  fonts, with filter), font size, line height, line numbers, word wrap —
-  all persisted between runs
+  fonts, with filter), font size, line height, line numbers, word wrap,
+  font ligatures on/off — all persisted between runs
 - View: Zoom (Ctrl+Plus / Ctrl+Minus / Ctrl+0), status bar toggle,
   spellcheck toggle, theme selection, local theme import, and
   `vscodethemes.com` URL import

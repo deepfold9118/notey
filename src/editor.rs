@@ -508,6 +508,8 @@ pub struct EditorTheme {
     pub gutter_bg: Color32,
     pub mark: Color32,
     pub dark: bool,
+    /// Let the font form ligatures (`->`, `!=`, `fi`, ...).
+    pub ligatures: bool,
 }
 
 pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool) -> EditorTheme {
@@ -525,6 +527,7 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
         },
         misspell: Color32::from_rgb(232, 82, 82),
         gutter_bg: p.chrome,
+        ligatures: true,
         mark: Color32::from_rgba_unmultiplied(
             p.accent.r(),
             p.accent.g(),
@@ -1583,6 +1586,9 @@ fn line_galley_colored(
             &base,
             th.misspell,
         );
+        if !th.ligatures {
+            break_ligatures(&mut job);
+        }
         return ui.ctx().fonts_mut(|f| f.layout_job(job));
     }
     let normal = base;
@@ -1596,7 +1602,53 @@ fn line_galley_colored(
         }
         None => job.append(slice, 0.0, normal),
     }
+    if !th.ligatures {
+        break_ligatures(&mut job);
+    }
     ui.ctx().fonts_mut(|f| f.layout_job(job))
+}
+
+/// egui shapes each layout section separately with the font's default
+/// features, so a ligature can only form inside one section. Splitting
+/// sections between the characters a ligature could join turns them off.
+///
+/// Only pairs of visible ASCII characters are split: scripts such as Arabic,
+/// combining marks and emoji sequences need shaping across characters to
+/// render at all. Letter and digit runs stay whole except after the letters
+/// that begin common ligatures (`fi`, `fl`, `ff`, `Th`, `www`, `0x`).
+pub(crate) fn break_ligatures(job: &mut LayoutJob) {
+    use eframe::egui::text::{ByteIndex, LayoutSection};
+    fn may_join(a: char, b: char) -> bool {
+        a.is_ascii_alphanumeric() && b.is_ascii_alphanumeric() && !matches!(a, 'f' | 'F' | 'T' | 'w' | '0')
+    }
+    let text = &job.text;
+    let mut out: Vec<LayoutSection> = Vec::with_capacity(job.sections.len());
+    for section in &job.sections {
+        let (start, end) = (section.byte_range.start.0, section.byte_range.end.0);
+        let mut piece_start = start;
+        let mut prev: Option<char> = None;
+        for (i, c) in text[start..end].char_indices() {
+            let at = start + i;
+            if let Some(p) = prev {
+                let split = p.is_ascii_graphic() && c.is_ascii_graphic() && !may_join(p, c);
+                if split {
+                    out.push(LayoutSection {
+                        leading_space: if piece_start == start { section.leading_space } else { 0.0 },
+                        byte_range: ByteIndex(piece_start)..ByteIndex(at),
+                        format: section.format.clone(),
+                    });
+                    piece_start = at;
+                }
+            }
+            prev = Some(c);
+        }
+        out.push(LayoutSection {
+            leading_space: if piece_start == start { section.leading_space } else { 0.0 },
+            byte_range: ByteIndex(piece_start)..ByteIndex(end),
+            format: section.format.clone(),
+        });
+    }
+    job.sections = out;
 }
 
 /// Plain layout used for hit-testing and painting when no syntax is active.
@@ -1714,6 +1766,22 @@ pub(crate) fn append_highlighted_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn break_ligatures_splits_only_ligature_pairs() {
+        let line = "a->b != c; fine مرحبا";
+        let mut job = LayoutJob::default();
+        job.append(line, 4.0, TextFormat::default());
+        break_ligatures(&mut job);
+        let pieces: Vec<&str> = job
+            .sections
+            .iter()
+            .map(|s| &line[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+        assert_eq!(pieces, ["a", "-", ">", "b !", "= c", "; f", "ine مرحبا"]);
+        assert_eq!(job.sections[0].leading_space, 4.0);
+        assert!(job.sections[1..].iter().all(|s| s.leading_space == 0.0));
+    }
 
     #[test]
     fn syntax_colors_keep_spell_underlines() {
