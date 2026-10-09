@@ -2225,14 +2225,18 @@ impl NoteyApp {
                     .id_salt(("editor_scroll", doc.id))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        egui::TextEdit::multiline(&mut doc.text)
+                        let output = egui::TextEdit::multiline(&mut doc.text)
                             .id(editor_id)
                             .frame(egui::Frame::NONE)
                             .desired_width(f32::INFINITY)
                             .desired_rows(30)
                             .lock_focus(true) // Tab inserts a tab character
                             .layouter(&mut layouter)
-                            .show(ui)
+                            .show(ui);
+                        if output.response.dragged_by(egui::PointerButton::Primary) {
+                            editor::scroll_while_selecting(ui, word_wrap);
+                        }
+                        output
                     })
                     .inner;
                 if let Some((gutter_left, gutter_w)) = gutter {

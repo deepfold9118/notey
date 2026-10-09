@@ -6,6 +6,15 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-09
+
+### Fixed
+- When you select text with the mouse, the editor now scrolls if you move
+  the pointer above or below the text area (or to the left or right of it
+  without word wrap). The farther the pointer is from the edge, the faster
+  the scroll. The mouse wheel also scrolls while you select, so you can
+  extend a selection past the visible lines.
+
 ## [0.5.3] - 2026-10-09
 
 ### Fixed
@@ -141,7 +150,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/deepfold9118/notey/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/deepfold9118/notey/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/deepfold9118/notey/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/deepfold9118/notey/compare/v0.5.0...v0.5.1

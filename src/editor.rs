@@ -783,6 +783,9 @@ pub fn show(
                     state.column_drag_origin = None;
                 }
             }
+            if resp.dragged_by(PointerButton::Primary) {
+                scroll_while_selecting(ui, wrap);
+            }
 
             // ---- keyboard ----
             if focused {
@@ -1641,6 +1644,49 @@ fn line_galley_colored(
     ui.ctx().fonts_mut(|f| f.layout_job(job))
 }
 
+/// Scroll the editor while the user drags a selection. Call it in the
+/// scroll area, in a frame where the editor is being dragged.
+///
+/// egui's `ScrollArea` ignores the mouse wheel while a widget is being
+/// dragged, and it does not scroll when the pointer goes past an edge. This
+/// function does both: the wheel scrolls as usual, and a pointer above or
+/// below the view (or to the left or right of it, without word wrap)
+/// scrolls in that direction. The speed increases with the distance.
+pub(crate) fn scroll_while_selecting(ui: &egui::Ui, wrap: bool) {
+    let view = ui.clip_rect();
+    let wheel = ui.input(|i| i.smooth_scroll_delta);
+    let mut delta = wheel;
+    if wheel != egui::Vec2::ZERO {
+        ui.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+    }
+    if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
+        let dt = ui.input(|i| i.stable_dt).min(0.1);
+        // Points per second: a slow start at the edge, faster farther out.
+        let speed = |dist: f32| (60.0 + dist.min(300.0) * 12.0) * dt;
+        let mut edge = egui::Vec2::ZERO;
+        if pos.y < view.top() {
+            edge.y = speed(view.top() - pos.y);
+        } else if pos.y > view.bottom() {
+            edge.y = -speed(pos.y - view.bottom());
+        }
+        if !wrap {
+            if pos.x < view.left() {
+                edge.x = speed(view.left() - pos.x);
+            } else if pos.x > view.right() {
+                edge.x = -speed(pos.x - view.right());
+            }
+        }
+        if edge != egui::Vec2::ZERO {
+            delta += edge;
+            // Keep the frames coming while the pointer stays still.
+            ui.ctx().request_repaint();
+        }
+    }
+    if delta != egui::Vec2::ZERO {
+        ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
+    }
+}
+
 /// The largest tab size. The app registers one tab font family for each
 /// width from 1 to this value.
 pub(crate) const MAX_TAB_SIZE: usize = 16;
@@ -1904,6 +1950,61 @@ mod tests {
             .map(|s| &line[s.byte_range.start.0..s.byte_range.end.0])
             .collect();
         assert_eq!(joined, line);
+    }
+
+    #[test]
+    fn drag_selection_scrolls_past_the_edge_and_with_the_wheel() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("editor");
+        let th = theme_from_palette(&crate::theme::palette(true), FontId::monospace(14.0), 18.0, true);
+        let mut text: String = (0..200).map(|i| format!("line {i}\n")).collect();
+        let mut state = EditorState::default();
+        let mut time = 0.0;
+        let mut frame = |events: Vec<egui::Event>| {
+            time += 1.0 / 60.0;
+            let input = egui::RawInput {
+                events,
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                show(ui, id, &mut text, 0, &mut state, &th, false, true, None, &[], false, None);
+            });
+            (state.anchor, state.cursor)
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let start = egui::pos2(2.0, 10.0);
+        frame(vec![egui::Event::PointerMoved(start)]);
+        frame(vec![button(start, true)]);
+        let (anchor, _) = frame(vec![egui::Event::PointerMoved(egui::pos2(20.0, 100.0))]);
+        assert_eq!(anchor, 0, "the selection must start at the press position");
+        // Hold the pointer below the view: the editor scrolls down.
+        let (_, before) = frame(vec![egui::Event::PointerMoved(egui::pos2(20.0, 400.0))]);
+        let mut after_edge = before;
+        for _ in 0..30 {
+            after_edge = frame(vec![]).1;
+        }
+        assert!(after_edge > before, "no scroll past the edge: {before} -> {after_edge}");
+        // Back inside the view, the wheel scrolls during the drag.
+        let (_, before) = frame(vec![egui::Event::PointerMoved(egui::pos2(20.0, 150.0))]);
+        frame(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Default::default(),
+        }]);
+        let mut after = (0, before);
+        for _ in 0..10 {
+            after = frame(vec![]);
+        }
+        assert!(after.1 > before, "no wheel scroll in a drag: {before} -> {}", after.1);
+        assert_eq!(after.0, 0);
     }
 
     #[test]

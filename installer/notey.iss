@@ -1,5 +1,5 @@
 #define MyAppName "Notey"
-#define MyAppVersion "0.5.3"
+#define MyAppVersion "0.5.4"
 #define MyAppPublisher "Notey"
 #define MyAppExeName "notey.exe"
 ; extensions offered in the Open With menu
