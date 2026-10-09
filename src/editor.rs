@@ -79,7 +79,7 @@ pub struct EditorState {
     wrap_prefix: Vec<u32>,
     wrap_valid: bool,
     /// (wrap width bits, font size bits) the cache was built for.
-    wrap_key: (u32, u32),
+    wrap_key: (u32, u32, usize),
     /// Preserved x position for repeated Up/Down.
     desired_x: Option<f32>,
     /// Secondary cursors as (anchor, head); the primary lives in
@@ -510,6 +510,8 @@ pub struct EditorTheme {
     pub dark: bool,
     /// Let the font form ligatures (`->`, `!=`, `fi`, ...).
     pub ligatures: bool,
+    /// The distance between tab stops, in columns.
+    pub tab_size: usize,
 }
 
 pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool) -> EditorTheme {
@@ -528,6 +530,7 @@ pub fn theme_from_palette(p: &Palette, font: FontId, row_height: f32, dark: bool
         misspell: Color32::from_rgb(232, 82, 82),
         gutter_bg: p.chrome,
         ligatures: true,
+        tab_size: 4,
         mark: Color32::from_rgba_unmultiplied(
             p.accent.r(),
             p.accent.g(),
@@ -587,6 +590,7 @@ pub fn show(
     let wrap_key = (
         wrap_w.map(|w| w.to_bits()).unwrap_or(u32::MAX),
         th.font.size.to_bits(),
+        th.tab_size,
     );
     if !state.wrap_valid || state.wrap_key != wrap_key || state.wrap_rows.len() != n_lines {
         state.wrap_rows = vec![u32::MAX; n_lines];
@@ -714,18 +718,25 @@ pub fn show(
                     state.cursor = end;
                     state.collapse_extras();
                 } else if resp.drag_started_by(PointerButton::Primary) {
+                    // egui starts a drag only after the pointer moves a few
+                    // pixels. Put the anchor where the button went down, else
+                    // the selection does not include the first character.
+                    let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(pos);
+                    let start = pos_to_char(
+                        state, text, origin, ui, th, spell, wrap_w, rect.top(), text_x, row_h,
+                    );
                     if mods.alt {
                         // column (box) selection
                         state.column_drag_origin =
-                            Some((pos.x - text_x, pos.y - rect.top()));
-                        state.anchor = c;
+                            Some((origin.x - text_x, origin.y - rect.top()));
+                        state.anchor = start;
                         state.cursor = c;
                         state.collapse_extras();
                     } else {
                         state.column_drag_origin = None;
                         state.cursor = c;
                         if !mods.shift {
-                            state.anchor = c;
+                            state.anchor = start;
                         }
                         state.collapse_extras();
                     }
@@ -764,6 +775,11 @@ pub fn show(
                     state.desired_x = None;
                 }
                 if resp.drag_stopped_by(PointerButton::Primary) {
+                    // The pointer can move in the frame that releases the
+                    // button. Use that last position for the selection end.
+                    if state.column_drag_origin.is_none() {
+                        state.cursor = c;
+                    }
                     state.column_drag_origin = None;
                 }
             }
@@ -1604,6 +1620,7 @@ fn line_galley_colored(
         if !th.ligatures {
             break_ligatures(&mut job);
         }
+        apply_tab_stops(&mut job, th.tab_size);
         return ui.ctx().fonts_mut(|f| f.layout_job(job));
     }
     let normal = base;
@@ -1620,7 +1637,74 @@ fn line_galley_colored(
     if !th.ligatures {
         break_ligatures(&mut job);
     }
+    apply_tab_stops(&mut job, th.tab_size);
     ui.ctx().fonts_mut(|f| f.layout_job(job))
+}
+
+/// The largest tab size. The app registers one tab font family for each
+/// width from 1 to this value.
+pub(crate) const MAX_TAB_SIZE: usize = 16;
+
+/// The font family of the editor font, with a tab width of `cols` spaces.
+pub(crate) fn tab_family(cols: usize) -> egui::FontFamily {
+    egui::FontFamily::Name(format!("editor-tab{cols}").into())
+}
+
+/// egui gives each tab a fixed width. Text editors instead move a tab to the
+/// next tab stop, which is a multiple of `tab_size` columns. This puts each
+/// tab in its own section and gives it the font family with the tab width
+/// that goes to the next stop. Only sections in the editor family change.
+pub(crate) fn apply_tab_stops(job: &mut LayoutJob, tab_size: usize) {
+    use eframe::egui::text::{ByteIndex, LayoutSection};
+    if !job.text.contains('\t') {
+        return;
+    }
+    let tab_size = tab_size.clamp(1, MAX_TAB_SIZE);
+    let editor = egui::FontFamily::Name("editor".into());
+    let text = &job.text;
+    let mut out: Vec<LayoutSection> = Vec::with_capacity(job.sections.len());
+    let mut col = 0usize;
+    for section in &job.sections {
+        let (start, end) = (section.byte_range.start.0, section.byte_range.end.0);
+        let change = section.format.font_id.family == editor;
+        let mut piece_start = start;
+        for (i, c) in text[start..end].char_indices() {
+            match c {
+                '\n' => col = 0,
+                '\t' => {
+                    let width = tab_size - col % tab_size;
+                    col += width;
+                    if change {
+                        let at = start + i;
+                        if at > piece_start {
+                            out.push(LayoutSection {
+                                leading_space: if piece_start == start { section.leading_space } else { 0.0 },
+                                byte_range: ByteIndex(piece_start)..ByteIndex(at),
+                                format: section.format.clone(),
+                            });
+                        }
+                        let mut format = section.format.clone();
+                        format.font_id.family = tab_family(width);
+                        out.push(LayoutSection {
+                            leading_space: if at == start { section.leading_space } else { 0.0 },
+                            byte_range: ByteIndex(at)..ByteIndex(at + 1),
+                            format,
+                        });
+                        piece_start = at + 1;
+                    }
+                }
+                _ => col += 1,
+            }
+        }
+        if piece_start < end || piece_start == start {
+            out.push(LayoutSection {
+                leading_space: if piece_start == start { section.leading_space } else { 0.0 },
+                byte_range: ByteIndex(piece_start)..ByteIndex(end),
+                format: section.format.clone(),
+            });
+        }
+    }
+    job.sections = out;
 }
 
 /// egui shapes each layout section separately with the font's default
@@ -1796,6 +1880,30 @@ mod tests {
         assert_eq!(pieces, ["a", "-", ">", "b !", "= c", "; f", "ine مرحبا"]);
         assert_eq!(job.sections[0].leading_space, 4.0);
         assert!(job.sections[1..].iter().all(|s| s.leading_space == 0.0));
+    }
+
+    #[test]
+    fn tabs_go_to_the_next_tab_stop() {
+        let line = "1.\tab\n\t\tx\tyz";
+        let mut job = LayoutJob::default();
+        job.append(line, 0.0, TextFormat::simple(FontId::new(14.0, egui::FontFamily::Name("editor".into())), Color32::WHITE));
+        apply_tab_stops(&mut job, 4);
+        let tabs: Vec<(usize, egui::FontFamily)> = job
+            .sections
+            .iter()
+            .filter(|s| &line[s.byte_range.start.0..s.byte_range.end.0] == "\t")
+            .map(|s| (s.byte_range.start.0, s.format.font_id.family.clone()))
+            .collect();
+        assert_eq!(
+            tabs,
+            [(2, tab_family(2)), (6, tab_family(4)), (7, tab_family(4)), (9, tab_family(3))]
+        );
+        let joined: String = job
+            .sections
+            .iter()
+            .map(|s| &line[s.byte_range.start.0..s.byte_range.end.0])
+            .collect();
+        assert_eq!(joined, line);
     }
 
     #[test]

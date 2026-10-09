@@ -6,6 +6,19 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-09
+
+### Fixed
+- The text cursor did not show, and typing did nothing, until you clicked in
+  the text. The editor now gets the keyboard focus when the window becomes
+  active, and when no other control has the focus.
+- A mouse selection did not include the first character (or the last
+  character, if you dragged backwards). The selection now starts where you
+  pressed the mouse button, not where the drag started.
+- A tab now goes to the next tab stop (a multiple of the tab size), as in
+  Notepad++. Before, each tab had a fixed width, thus text after `1.` and a
+  tab did not align with text after a tab alone.
+
 ## [0.5.2] - 2026-09-27
 
 ### Fixed
@@ -128,7 +141,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/deepfold9118/notey/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/deepfold9118/notey/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/deepfold9118/notey/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/deepfold9118/notey/compare/v0.4.1...v0.5.0

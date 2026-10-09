@@ -145,6 +145,8 @@ pub struct NoteyApp {
 
     pending_events: Vec<egui::Event>,
     focus_editor: bool,
+    /// The window had OS focus in the previous frame.
+    window_focused: bool,
     close_confirm: Option<PendingClose>,
     allow_quit: bool,
 
@@ -254,6 +256,7 @@ impl NoteyApp {
             last_autosave: 0.0,
             pending_events: Vec::new(),
             focus_editor: true,
+            window_focused: false,
             close_confirm: None,
             allow_quit: false,
             ctx_word: None,
@@ -2040,6 +2043,7 @@ impl NoteyApp {
     }
 
     fn editor(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        self.keep_editor_focus(ctx);
         // rendered Markdown view (toggled by the bundled Markdown Preview
         // plugin) replaces whichever editor is active for this tab
         let active_id = self.docs[self.active].id;
@@ -2091,6 +2095,7 @@ impl NoteyApp {
             && self.docs[self.active].text.len() < 512 * 1024;
         let word_wrap = self.word_wrap;
         let ligatures = self.ligatures;
+        let tab_size = self.tab_cols();
         let editor_id = self.editor_id();
         let doc_id = self.docs[self.active].id;
         let language = self.docs[self.active].language.clone();
@@ -2180,6 +2185,7 @@ impl NoteyApp {
                 if !ligatures {
                     editor::break_ligatures(&mut job);
                 }
+                editor::apply_tab_stops(&mut job, tab_size);
                 return ui.fonts_mut(|f| f.layout_job(job));
             }
             if !spell_on {
@@ -2194,6 +2200,7 @@ impl NoteyApp {
             if !ligatures {
                 editor::break_ligatures(&mut job);
             }
+            editor::apply_tab_stops(&mut job, tab_size);
             ui.fonts_mut(|f| f.layout_job(job))
         };
 
@@ -2398,6 +2405,29 @@ impl NoteyApp {
         }
     }
 
+    /// The tab size as a whole number of columns.
+    fn tab_cols(&self) -> usize {
+        (self.tab_size.round() as usize).clamp(1, editor::MAX_TAB_SIZE)
+    }
+
+    /// Give the keyboard focus to the editor when the window becomes active,
+    /// and when no other widget has the focus. The caret is then visible and
+    /// the user can type at once, without a click in the text.
+    fn keep_editor_focus(&mut self, ctx: &egui::Context) {
+        let window_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let gained = window_focused && !self.window_focused;
+        self.window_focused = window_focused;
+        if !window_focused || self.close_confirm.is_some() || self.reload_confirm.is_some() {
+            return;
+        }
+        let nothing_focused = ctx.memory(|m| m.focused().is_none());
+        let popup_open = egui::Popup::is_any_open(ctx);
+        let pointer_down = ctx.input(|i| i.pointer.any_down());
+        if gained || (nothing_focused && !popup_open && !pointer_down) {
+            self.focus_editor = true;
+        }
+    }
+
     fn preview_editor_ui(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let font = FontId::new(self.font_size * self.zoom / 100.0, editor_family());
         let base_row = ui.fonts_mut(|f| f.row_height(&font));
@@ -2405,6 +2435,7 @@ impl NoteyApp {
         let p = self.palette();
         let mut th = editor::theme_from_palette(&p, font, row_h, self.dark);
         th.ligatures = self.ligatures;
+        th.tab_size = self.tab_cols();
         let spell_on = self.spell_enabled
             && self.spell.available()
             && self.docs[self.active].text.len() < 4 * 1024 * 1024;
@@ -3516,10 +3547,10 @@ fn rebuild_fonts(ctx: &egui::Context, editor_font: Option<&std::path::Path>, tab
         ("Consolas", "consola.ttf", FontFamily::Monospace),
         ("Segoe UI", ui_font, FontFamily::Proportional),
     ] {
-        if let Ok(bytes) = std::fs::read(format!("C:/Windows/Fonts/{file}")) {
+        if let Some(bytes) = font_bytes(std::path::Path::new(&format!("C:/Windows/Fonts/{file}"))) {
             fonts
                 .font_data
-                .insert(name.to_string(), Arc::new(egui::FontData::from_owned(bytes)));
+                .insert(name.to_string(), Arc::new(egui::FontData::from_static(bytes)));
             fonts
                 .families
                 .entry(family)
@@ -3530,10 +3561,10 @@ fn rebuild_fonts(ctx: &egui::Context, editor_font: Option<&std::path::Path>, tab
 
     let mut editor_stack: Vec<String> = Vec::new();
     if let Some(path) = editor_font {
-        if let Ok(bytes) = std::fs::read(path) {
+        if let Some(bytes) = font_bytes(path) {
             fonts.font_data.insert(
                 EDITOR_FONT_KEY.to_string(),
-                Arc::new(egui::FontData::from_owned(bytes)),
+                Arc::new(egui::FontData::from_static(bytes)),
             );
             editor_stack.push(EDITOR_FONT_KEY.to_string());
         }
@@ -3546,9 +3577,9 @@ fn rebuild_fonts(ctx: &egui::Context, editor_font: Option<&std::path::Path>, tab
             }
         }
     }
-    fonts.families.insert(editor_family(), editor_stack);
 
     // apply the configured tab width to every font so it's consistent
+    let tab_size = tab_size.round().clamp(1.0, editor::MAX_TAB_SIZE as f32);
     for fd in fonts.font_data.values_mut() {
         if (fd.tweak.tab_size - tab_size).abs() > f32::EPSILON {
             let mut f = (**fd).clone();
@@ -3556,7 +3587,39 @@ fn rebuild_fonts(ctx: &egui::Context, editor_font: Option<&std::path::Path>, tab
             *fd = Arc::new(f);
         }
     }
+
+    // One copy of the editor stack for each tab width, so that a tab can go
+    // to the next tab stop (see `editor::apply_tab_stops`). The font bytes
+    // are static, thus each copy is small.
+    for cols in 1..=editor::MAX_TAB_SIZE {
+        let mut stack = Vec::with_capacity(editor_stack.len());
+        for name in &editor_stack {
+            let Some(fd) = fonts.font_data.get(name) else { continue };
+            let mut f = (**fd).clone();
+            f.tweak.tab_size = cols as f32;
+            let key = format!("{name}#tab{cols}");
+            fonts.font_data.insert(key.clone(), Arc::new(f));
+            stack.push(key);
+        }
+        fonts.families.insert(editor::tab_family(cols), stack);
+    }
+    fonts.families.insert(editor_family(), editor_stack);
     ctx.set_fonts(fonts);
+}
+
+/// Font file bytes that live for the whole run. Each file is read one time,
+/// so the tab-width copies of a font and later font changes share the bytes.
+fn font_bytes(path: &std::path::Path) -> Option<&'static [u8]> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, &'static [u8]>>> = OnceLock::new();
+    let mut cache = CACHE.get_or_init(Default::default).lock().ok()?;
+    if let Some(bytes) = cache.get(path) {
+        return Some(bytes);
+    }
+    let bytes: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
+    cache.insert(path.to_path_buf(), bytes);
+    Some(bytes)
 }
 
 /// Installed fonts from the Windows registry: display name -> font file path.
