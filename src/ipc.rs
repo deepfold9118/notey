@@ -34,6 +34,9 @@ pub fn try_forward(paths: &[PathBuf]) -> bool {
     let Ok(mut conn) = Stream::connect(name) else {
         return false;
     };
+    // Explorer gives this process the right to set the foreground window.
+    // Give that right to the running instance, so that it can come to the front.
+    win::allow_foreground();
     let mut sent_any = false;
     for p in paths {
         let abs = clean_path(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()));
@@ -47,8 +50,9 @@ pub fn try_forward(paths: &[PathBuf]) -> bool {
 
 /// Become the primary instance: listen for forwarded paths on a background
 /// thread. Returns false if another instance already owns the socket (this
-/// process then simply runs standalone).
-pub fn start_listener(inbox: Inbox, ctx: eframe::egui::Context) -> bool {
+/// process then simply runs standalone). `hwnd` is the main window. The
+/// listener restores it and brings it to the front when files arrive.
+pub fn start_listener(inbox: Inbox, ctx: eframe::egui::Context, hwnd: Option<isize>) -> bool {
     let Ok(name) = SOCKET_NAME.to_ns_name::<GenericNamespaced>() else {
         return false;
     };
@@ -68,9 +72,47 @@ pub fn start_listener(inbox: Inbox, ctx: eframe::egui::Context) -> bool {
                 }
             }
             if got_any {
+                if let Some(hwnd) = hwnd {
+                    win::activate(hwnd);
+                }
                 ctx.request_repaint();
             }
         }
     });
     true
+}
+
+/// Win32 calls that put the window in front, as Notepad++ does.
+#[cfg(windows)]
+mod win {
+    const ASFW_ANY: u32 = u32::MAX;
+    const SW_RESTORE: i32 = 9;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn AllowSetForegroundWindow(process_id: u32) -> i32;
+        fn IsIconic(hwnd: isize) -> i32;
+        fn ShowWindowAsync(hwnd: isize, cmd: i32) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+    }
+
+    pub fn allow_foreground() {
+        unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+    }
+
+    /// Restore the window if it is minimized, then make it the foreground window.
+    pub fn activate(hwnd: isize) {
+        unsafe {
+            if IsIconic(hwnd) != 0 {
+                ShowWindowAsync(hwnd, SW_RESTORE);
+            }
+            SetForegroundWindow(hwnd);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod win {
+    pub fn allow_foreground() {}
+    pub fn activate(_hwnd: isize) {}
 }

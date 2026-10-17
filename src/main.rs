@@ -99,8 +99,18 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             // first instance wins the socket; later windows run standalone
-            let is_primary = ipc::start_listener(inbox.clone(), cc.egui_ctx.clone());
+            let hwnd = main_hwnd(cc);
+            let is_primary = ipc::start_listener(inbox.clone(), cc.egui_ctx.clone(), hwnd);
             Ok(Box::new(app::NoteyApp::new(cc, paths, inbox, is_primary)))
         }),
     )
+}
+
+/// The Win32 handle of the main window, if the platform gives one.
+fn main_hwnd(cc: &eframe::CreationContext<'_>) -> Option<isize> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match cc.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+        _ => None,
+    }
 }

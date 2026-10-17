@@ -3291,10 +3291,10 @@ impl eframe::App for NoteyApp {
             std::mem::take(&mut *q)
         };
         if !forwarded.is_empty() {
+            // the IPC listener already brought the window to the front
             for path in &forwarded {
                 self.open_path(path);
             }
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
 
         if self.close_confirm.is_none() {

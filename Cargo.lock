@@ -2453,7 +2453,7 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "notey"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "arboard",
  "chrono",
@@ -2465,6 +2465,7 @@ dependencies = [
  "image",
  "interprocess",
  "pulldown-cmark",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "rhai",

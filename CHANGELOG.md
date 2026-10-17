@@ -6,6 +6,15 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-16
+
+### Fixed
+- When you open a file with Notey from File Explorer (for example, with
+  "Open with") and Notey is already open, the Notey window now comes to the
+  front, as in Notepad++. If the window is minimized, Notey restores it.
+  Before, the file opened in a new tab, but the window stayed behind other
+  windows or stayed minimized.
+
 ## [0.5.4] - 2026-10-09
 
 ### Fixed
@@ -150,7 +159,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/deepfold9118/notey/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/deepfold9118/notey/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/deepfold9118/notey/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/deepfold9118/notey/compare/v0.5.1...v0.5.2
