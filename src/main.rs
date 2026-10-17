@@ -9,6 +9,7 @@ mod plugin_manager;
 mod plugins;
 mod search;
 mod session;
+mod shutdown;
 mod spell;
 mod syntax;
 mod theme;
@@ -91,6 +92,7 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport,
+        wgpu_options: wgpu_options(),
         ..Default::default()
     };
     let inbox: ipc::Inbox = Default::default();
@@ -100,10 +102,29 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             // first instance wins the socket; later windows run standalone
             let hwnd = main_hwnd(cc);
+            shutdown::install(hwnd);
             let is_primary = ipc::start_listener(inbox.clone(), cc.egui_ctx.clone(), hwnd);
             Ok(Box::new(app::NoteyApp::new(cc, paths, inbox, is_primary)))
         }),
     )
+}
+
+/// The wgpu settings. On Windows, Notey does not use the OpenGL backend.
+/// That backend makes a hidden window on a thread that does not read its
+/// messages. Windows then reports the window as "not responding". As a
+/// result, the Restart Manager (Inno Setup upgrade) does not close Notey,
+/// and the shutdown waits for that window. DirectX 12 and Vulkan do not make
+/// such a window. The `WGPU_BACKEND` environment variable still selects a
+/// backend.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    #[allow(unused_mut)]
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+    #[cfg(windows)]
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        setup.instance_descriptor.backends =
+            eframe::wgpu::Backends::from_env().unwrap_or(eframe::wgpu::Backends::PRIMARY);
+    }
+    options
 }
 
 /// The Win32 handle of the main window, if the platform gives one.

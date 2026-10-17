@@ -6,6 +6,17 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-10-16
+
+### Fixed
+- Windows shutdown and the Notey setup program (when it installs an update)
+  can now close Notey. Before, Notey did not save the session at shutdown.
+  Now it saves the session, as it does when you close the window.
+- On Windows, Notey no longer starts the OpenGL graphics backend. That
+  backend made a hidden window that did not respond, thus the setup program
+  could not close Notey. Notey uses DirectX 12 or Vulkan. You can still
+  select a backend with the `WGPU_BACKEND` environment variable.
+
 ## [0.5.5] - 2026-10-16
 
 ### Fixed
@@ -159,7 +170,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/deepfold9118/notey/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/deepfold9118/notey/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/deepfold9118/notey/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/deepfold9118/notey/compare/v0.5.2...v0.5.3
