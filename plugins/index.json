@@ -73,6 +73,23 @@
       "version": "1.0.0"
     },
     {
+      "description": "Colors the selected text and its background with the 16 terminal (ANSI) colors, from the right-click menu or Format menu. The colors stay while the tab is open; they are not saved to the file.",
+      "dir": "features/feature-text-color",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "5eee3d8356d6e9b7ca4ef71886817b85c5ed45ec8c6e85362a8c52bda0ca13b9",
+          "size": 2097
+        }
+      ],
+      "id": "feature-text-color",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Text Color",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
       "description": "Shows the word count in the status bar (or the selection's count), with estimated reading time on hover.",
       "dir": "features/feature-word-count",
       "files": [

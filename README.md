@@ -13,9 +13,10 @@ Variable, rounded menus and dialogs, and an accent-colored selection.
 Window dragging, double-click maximize, and edge resizing are all
 implemented on top of the frameless window.
 
-By default there is no menu bar — the File/Edit/View/Help menus open from
-the Notey icon in the top-left of the title bar. Turn on "Always show menu
-bar" in Edit > Preferences (Ctrl+,) to get the classic menu row back.
+By default, Notey shows a menu bar with the File, Edit, Format, View,
+Language, Plugins, and Help menus. For a more compact window, turn off
+"Show menu bar" in Edit > Preferences (Ctrl+,). Then the menus open from
+the Notey icon in the top-left of the title bar.
 
 ## Run
 

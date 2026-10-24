@@ -73,12 +73,14 @@ pub struct NoteyApp {
     theme_download_rx: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
     word_wrap: bool,
     show_status: bool,
-    /// Always show the classic menu bar row. Off by default — the menus
-    /// live under the title-bar icon instead.
+    /// Show the classic menu bar row. On by default. When off, the menus
+    /// open from the title-bar icon.
     show_menu: bool,
     /// Use the virtualized preview editor instead of egui's TextEdit.
     preview_editor: bool,
     editor_states: HashMap<u64, EditorState>,
+    /// Colors that plugins put on text, for each document (memory only).
+    text_styles: HashMap<u64, crate::styles::Styles>,
     /// Tabs currently showing the rendered Markdown view instead of the
     /// editor (session-transient, keyed by document id).
     md_rendered: std::collections::HashSet<u64>,
@@ -201,9 +203,10 @@ impl NoteyApp {
             theme_download_rx: None,
             word_wrap: true,
             show_status: true,
-            show_menu: false,
+            show_menu: true,
             preview_editor: true,
             editor_states: HashMap::new(),
+            text_styles: HashMap::new(),
             md_rendered: std::collections::HashSet::new(),
             md_split: std::collections::HashSet::new(),
             status_items: Vec::new(),
@@ -293,7 +296,9 @@ impl NoteyApp {
             app.spell_enabled = get_bool("spell", true);
             app.show_line_numbers = get_bool("line_numbers", false);
             app.ligatures = get_bool("ligatures", true);
-            app.show_menu = get_bool("show_menu", false);
+            // New key: the menu bar became the default in 0.6.0, so the "off"
+            // saved while it was opt-in is deliberately ignored once.
+            app.show_menu = get_bool("menu_bar", true);
             // New key: the virtualized editor became the default in 0.4.0, so
             // the "off" saved while it was opt-in is deliberately ignored once.
             app.preview_editor = get_bool("editor_virtualized", true);
@@ -750,6 +755,7 @@ impl NoteyApp {
             preview: self.preview_mode(doc.id).to_string(),
             script_name: String::new(),
             capabilities: Vec::new(),
+            styles: Vec::new(),
         }
     }
 
@@ -801,6 +807,15 @@ impl NoteyApp {
     fn apply_script_result(&mut self, ctx: &egui::Context, out: ScriptCtx) {
         if out.text_dirty {
             self.apply_text_diff(ctx, &out.text);
+        }
+        if !out.styles.is_empty() {
+            // the ops use offsets into the script's text, which is now the
+            // document's text
+            let doc = &self.docs[self.active];
+            let styles = self.text_styles.entry(doc.id).or_default();
+            for op in out.styles {
+                styles.apply(&doc.text, op.start, op.end, op.fg, op.bg);
+            }
         }
         if out.sel_dirty {
             self.set_cursor(ctx, out.sel.0, out.sel.1);
@@ -1587,6 +1602,18 @@ impl NoteyApp {
                     self.prefs_open = true;
                 }
             });
+            ui.menu_button("Format", |ui| {
+                ui.checkbox(&mut self.word_wrap, "Word Wrap");
+                let language = self.docs[self.active].language.clone();
+                let scripts = &self.plugin_host.scripts;
+                if scripts.iter().flat_map(|s| &s.commands).any(|c| c.menu == "Format") {
+                    ui.separator();
+                }
+                if let Some(run) = plugin_command_items(ui, scripts, language.as_deref(), Some("Format")) {
+                    self.pending_plugin_cmds.push(run);
+                    self.focus_editor = true;
+                }
+            });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Zoom", |ui| {
                     if menu_item(ui, "Zoom In", "Ctrl+Plus") {
@@ -1687,33 +1714,15 @@ impl NoteyApp {
                     ui.close();
                 }
                 ui.separator();
-                let mut run: Option<(usize, String)> = None;
                 let language = self.docs[self.active].language.clone();
-                for (i, script) in self.plugin_host.scripts.iter().enumerate() {
-                    for cmd in &script.commands {
-                        // focus conditions don't apply to menu clicks
-                        let available = cmd.when.matches(language.as_deref(), true);
-                        let btn = if cmd.shortcut_text.is_empty() {
-                            ui.add_enabled(available, egui::Button::new(&cmd.title))
-                        } else {
-                            ui.add_enabled(
-                                available,
-                                egui::Button::new(&cmd.title)
-                                    .shortcut_text(&cmd.shortcut_text),
-                            )
-                        };
-                        if btn
-                            .on_hover_text(format!(
-                                "{} — {}",
-                                script.name,
-                                script.path.display()
-                            ))
-                            .clicked()
-                        {
-                            run = Some((i, cmd.id.clone()));
-                            self.focus_editor = true;
-                        }
-                    }
+                let run = plugin_command_items(
+                    ui,
+                    &self.plugin_host.scripts,
+                    language.as_deref(),
+                    Some("Plugins"),
+                );
+                if run.is_some() {
+                    self.focus_editor = true;
                 }
                 if !self.plugin_host.scripts.is_empty() {
                     ui.separator();
@@ -2135,11 +2144,15 @@ impl NoteyApp {
             .editor_states
             .get_mut(&doc_id)
             .and_then(|state| state.hl.as_mut());
+        let styles = self.text_styles.entry(doc_id).or_default();
         let mut layouter = move |ui: &egui::Ui,
                                  buf: &dyn egui::TextBuffer,
                                  wrap_width: f32|
               -> Arc<egui::Galley> {
             let text = buf.as_str();
+            // the layouter sees each edit first: move the text styles here
+            styles.sync(text);
+            let runs = styles.byte_runs(text, 0, usize::MAX);
             let mut job = LayoutJob::default();
             job.wrap.max_width = if word_wrap { wrap_width } else { f32::INFINITY };
             let normal = TextFormat {
@@ -2186,6 +2199,7 @@ impl NoteyApp {
                     editor::break_ligatures(&mut job);
                 }
                 editor::apply_tab_stops(&mut job, tab_size);
+                crate::styles::apply_to_job(&mut job, &runs);
                 return ui.fonts_mut(|f| f.layout_job(job));
             }
             if !spell_on {
@@ -2201,6 +2215,7 @@ impl NoteyApp {
                 editor::break_ligatures(&mut job);
             }
             editor::apply_tab_stops(&mut job, tab_size);
+            crate::styles::apply_to_job(&mut job, &runs);
             ui.fonts_mut(|f| f.layout_job(job))
         };
 
@@ -2359,6 +2374,10 @@ impl NoteyApp {
                 self.set_cursor(ui.ctx(), 0, n);
                 ui.close();
             }
+            let language = self.docs[self.active].language.clone();
+            if let Some(run) = context_plugin_items(ui, &self.plugin_host.scripts, language.as_deref()) {
+                self.pending_plugin_cmds.push(run);
+            }
         });
 
         if let Some((a, b, s)) = replace_with {
@@ -2468,6 +2487,15 @@ impl NoteyApp {
         let marks_doc = self.marks_doc;
         let doc = &mut self.docs[self.active];
         let state = self.editor_states.entry(doc.id).or_default();
+        let styles = self.text_styles.entry(doc.id).or_default();
+        let scripts = &self.plugin_host.scripts;
+        let language = doc.language.clone();
+        let mut context_run: Option<(usize, String)> = None;
+        let mut extra_menu = |ui: &mut egui::Ui| {
+            if let Some(run) = context_plugin_items(ui, scripts, language.as_deref()) {
+                context_run = Some(run);
+            }
+        };
         let spell = if spell_on { Some(&self.spell) } else { None };
         let marks: &[(usize, usize)] = if marks_doc == doc.id {
             &self.search_marks
@@ -2487,7 +2515,12 @@ impl NoteyApp {
             marks,
             request_focus,
             imported_syntax_theme.as_deref(),
+            styles,
+            &mut extra_menu,
         );
+        if let Some(run) = context_run {
+            self.pending_plugin_cmds.push(run);
+        }
         if result.changed {
             // char offsets are stale after edits
             self.search_marks.clear();
@@ -3020,7 +3053,7 @@ impl NoteyApp {
                         ui.end_row();
 
                         ui.label("Menu bar:");
-                        ui.checkbox(&mut self.show_menu, "Always show menu bar")
+                        ui.checkbox(&mut self.show_menu, "Show menu bar")
                             .on_hover_text(
                                 "When off, the menus open from the Notey icon in the title bar",
                             );
@@ -3490,7 +3523,7 @@ impl eframe::App for NoteyApp {
         storage.set_string("spell", b(self.spell_enabled));
         storage.set_string("line_numbers", b(self.show_line_numbers));
         storage.set_string("ligatures", b(self.ligatures));
-        storage.set_string("show_menu", b(self.show_menu));
+        storage.set_string("menu_bar", b(self.show_menu));
         storage.set_string("editor_virtualized", b(self.preview_editor));
         storage.set_string("font_size", self.font_size.to_string());
         storage.set_string("zoom", self.zoom.to_string());
@@ -3516,6 +3549,88 @@ impl eframe::App for NoteyApp {
 }
 
 // ---------- helpers ----------
+
+/// The plugin commands of the editor's right-click menu, after a separator.
+fn context_plugin_items(
+    ui: &mut egui::Ui,
+    scripts: &[plugins::Script],
+    language: Option<&str>,
+) -> Option<(usize, String)> {
+    if !scripts.iter().flat_map(|s| &s.commands).any(|c| c.context) {
+        return None;
+    }
+    ui.separator();
+    plugin_command_items(ui, scripts, language, None)
+}
+
+/// Draw the plugin commands for one menu (a name from `plugins::MENUS`), or
+/// with `None`, the commands for the editor's right-click menu. Commands
+/// with a group go in a submenu, before the other commands. Returns the
+/// command that the user clicked.
+fn plugin_command_items(
+    ui: &mut egui::Ui,
+    scripts: &[plugins::Script],
+    language: Option<&str>,
+    menu: Option<&str>,
+) -> Option<(usize, String)> {
+    let wanted = |c: &plugins::PluginCommand| match menu {
+        Some(m) => c.menu == m,
+        None => c.context,
+    };
+    let mut run = None;
+    let mut groups: Vec<&str> = Vec::new();
+    for cmd in scripts.iter().flat_map(|s| &s.commands).filter(|c| wanted(c)) {
+        if let Some(g) = cmd.group.as_deref() {
+            if !groups.contains(&g) {
+                groups.push(g);
+            }
+        }
+    }
+    for g in groups {
+        ui.menu_button(g, |ui| {
+            for (i, script) in scripts.iter().enumerate() {
+                for cmd in script.commands.iter().filter(|c| wanted(c) && c.group.as_deref() == Some(g)) {
+                    if plugin_command_button(ui, script, cmd, language) {
+                        run = Some((i, cmd.id.clone()));
+                    }
+                }
+            }
+        });
+    }
+    for (i, script) in scripts.iter().enumerate() {
+        for cmd in script.commands.iter().filter(|c| wanted(c) && c.group.is_none()) {
+            if plugin_command_button(ui, script, cmd, language) {
+                run = Some((i, cmd.id.clone()));
+            }
+        }
+    }
+    run
+}
+
+fn plugin_command_button(
+    ui: &mut egui::Ui,
+    script: &plugins::Script,
+    cmd: &plugins::PluginCommand,
+    language: Option<&str>,
+) -> bool {
+    // focus conditions do not apply to menu clicks
+    let available = cmd.when.matches(language, true);
+    let mut button = match cmd.swatch {
+        Some(c) => egui::Button::new((egui::RichText::new("■").color(c), cmd.title.as_str())),
+        None => egui::Button::new(cmd.title.as_str()),
+    };
+    if !cmd.shortcut_text.is_empty() {
+        button = button.shortcut_text(cmd.shortcut_text.as_str());
+    }
+    let clicked = ui
+        .add_enabled(available, button)
+        .on_hover_text(format!("{} — {}", script.name, script.path.display()))
+        .clicked();
+    if clicked {
+        ui.close();
+    }
+    clicked
+}
 
 fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
     ui.add(egui::Button::new(label).shortcut_text(shortcut))

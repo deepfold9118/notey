@@ -12,13 +12,15 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use eframe::egui::{Key, KeyboardShortcut, Modifiers};
+use eframe::egui::{Color32, Key, KeyboardShortcut, Modifiers};
 use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope, AST};
 
 /// 2: command/key `when` conditions, key hooks, input/text_changed/
 /// selection_changed events, status items, preview modes, notey.text,
 /// notey.fs (capability-gated), notey.app.open/temp_path.
-pub const API_VERSION: i64 = 2;
+/// 3: command `menu`, `group`, `context` and `swatch`; text styles
+/// (`style_range`, `clear_styles`).
+pub const API_VERSION: i64 = 3;
 
 /// Permissions a script must declare (and, for installed plugins, the
 /// package must grant) before it can use the matching API.
@@ -104,6 +106,17 @@ pub struct ScriptCtx {
     /// Set by the host for the running script.
     pub script_name: String,
     pub capabilities: Vec<String>,
+    /// Text styles to put on the active buffer, in sequence.
+    pub styles: Vec<StyleOp>,
+}
+
+/// Set or clear the colors of a char range of the script's text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StyleOp {
+    pub start: usize,
+    pub end: usize,
+    pub fg: crate::styles::Change,
+    pub bg: crate::styles::Change,
 }
 
 impl ScriptCtx {
@@ -122,7 +135,18 @@ pub struct PluginCommand {
     pub shortcut: Option<KeyboardShortcut>,
     pub shortcut_text: String,
     pub when: When,
+    /// The menu that shows the command: "Plugins" (the default) or "Format".
+    pub menu: String,
+    /// Submenu in that menu, if any.
+    pub group: Option<String>,
+    /// Also show the command in the editor's right-click menu.
+    pub context: bool,
+    /// A color square shown before the title.
+    pub swatch: Option<Color32>,
 }
+
+/// Menus that plugin commands can go in.
+pub const MENUS: [&str; 2] = ["Plugins", "Format"];
 
 pub struct Script {
     pub name: String,
@@ -233,12 +257,21 @@ impl PluginHost {
                     .and_then(|v| v.clone().into_string().ok())
                     .unwrap_or_default();
                 let shortcut = parse_shortcut(&shortcut_text);
+                let text = |k: &str| m.get(k).and_then(|v| v.clone().into_string().ok());
+                let menu = text("menu")
+                    .and_then(|want| MENUS.iter().find(|n| n.eq_ignore_ascii_case(&want)))
+                    .unwrap_or(&MENUS[0])
+                    .to_string();
                 commands.push(PluginCommand {
                     id,
                     title,
                     shortcut,
                     shortcut_text,
                     when: When::parse(m.get("when")),
+                    menu,
+                    group: text("group").filter(|g| !g.is_empty()),
+                    context: m.get("context").and_then(|v| v.as_bool().ok()).unwrap_or(false),
+                    swatch: text("swatch").and_then(|c| parse_color(&c)),
                 });
             }
         }
@@ -440,6 +473,7 @@ fn join(parts, sep) {
                     preview: c.preview.clone(),
                     script_name: c.script_name.clone(),
                     capabilities: c.capabilities.clone(),
+                    styles: std::mem::take(&mut c.styles),
                 }
             }
         };
@@ -602,6 +636,36 @@ fn map_range(m: &Map, max: usize) -> (usize, usize) {
     };
     let (a, b) = (get("start"), get("end"));
     (a.min(max), b.min(max))
+}
+
+/// Parse "#rrggbb" (the `#` is optional).
+pub fn parse_color(s: &str) -> Option<Color32> {
+    let hex = s.trim().trim_start_matches('#');
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    Some(Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?))
+}
+
+/// Read one property of a `style_range` map: absent keeps it, "" clears it,
+/// "#rrggbb" sets it.
+fn style_change(m: &Map, key: &str) -> ApiResult<crate::styles::Change> {
+    use crate::styles::Change;
+    let Some(v) = m.get(key) else { return Ok(Change::Keep) };
+    if v.is_unit() {
+        return Ok(Change::Clear);
+    }
+    let s = v
+        .clone()
+        .into_string()
+        .map_err(|_| format!("style '{key}' must be a \"#rrggbb\" string"))?;
+    if s.is_empty() {
+        return Ok(Change::Clear);
+    }
+    parse_color(&s)
+        .map(Change::Set)
+        .ok_or_else(|| format!("style '{key}': '{s}' is not a \"#rrggbb\" color").into())
 }
 
 fn char_to_byte(s: &str, ci: usize) -> usize {
@@ -982,6 +1046,24 @@ fn api_engine(ctx: Ctx) -> Engine {
         let start = chars[..p].iter().rposition(|&ch| ch == '\n').map(|i| i + 1).unwrap_or(0);
         let end = chars[p..].iter().position(|&ch| ch == '\n').map(|i| p + i).unwrap_or(chars.len());
         range_map(start, end)
+    });
+
+    // ---- editor (API 3): text styles, kept in memory only ----
+    engine.register_fn("style_range", |e: &mut EditorApi, r: Map, style: Map| -> ApiResult<()> {
+        let fg = style_change(&style, "fg")?;
+        let bg = style_change(&style, "bg")?;
+        let mut c = e.ctx.borrow_mut();
+        let max = c.text.chars().count();
+        let (a, b) = map_range(&r, max);
+        c.styles.push(StyleOp { start: a.min(b), end: a.max(b), fg, bg });
+        Ok(())
+    });
+    engine.register_fn("clear_styles", |e: &mut EditorApi, r: Map| {
+        use crate::styles::Change;
+        let mut c = e.ctx.borrow_mut();
+        let max = c.text.chars().count();
+        let (a, b) = map_range(&r, max);
+        c.styles.push(StyleOp { start: a.min(b), end: a.max(b), fg: Change::Clear, bg: Change::Clear });
     });
 
     // ---- text helpers (API 2): fast host implementations ----

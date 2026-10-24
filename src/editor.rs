@@ -561,6 +561,8 @@ pub fn show(
     marks: &[(usize, usize)],
     request_focus: bool,
     imported_syntax_theme: Option<&syntect::highlighting::Theme>,
+    styles: &mut crate::styles::Styles,
+    extra_menu: &mut dyn FnMut(&mut egui::Ui),
 ) -> ShowResult {
     state.sync(text, revision);
     let mut changed = false;
@@ -890,6 +892,9 @@ pub fn show(
             let heads: Vec<usize> = sels_all.iter().map(|&(_, h)| h).collect();
             let cursor_line = state.line_of_char(state.cursor);
 
+            // the edits of this frame are done: move the text styles to agree
+            styles.sync(text);
+
             // ---- visible range ----
             let v_first = ((viewport.top() / row_h).floor().max(0.0) as u32)
                 .min(total_rows.saturating_sub(1));
@@ -933,8 +938,9 @@ pub fn show(
                     .hl
                     .as_ref()
                     .and_then(|h| h.spans.get(li).cloned().flatten());
+                let runs = styles.byte_runs(slice, start_chr, line_end);
                 let galley =
-                    line_galley_colored(ui, slice, th, spell, wrap_w, hl_spans.as_deref());
+                    line_galley_colored(ui, slice, th, spell, wrap_w, hl_spans.as_deref(), &runs);
 
                 // search marks (Mark All)
                 for &(ma, mb) in marks {
@@ -1157,6 +1163,7 @@ pub fn show(
                     state.cursor = state.total_chars;
                     ui.close();
                 }
+                extra_menu(ui);
             });
         });
 
@@ -1591,6 +1598,7 @@ fn next_word(state: &EditorState, text: &str, from: usize) -> usize {
 /// `line_height` is pinned to the theme row height so every visual row has
 /// identical geometry (the wrap cache and painters rely on this). Syntax
 /// colors never change glyph metrics, so hit-testing may pass `None` spans.
+/// The same is true for the text style `runs` (byte ranges of `slice`).
 fn line_galley_colored(
     ui: &egui::Ui,
     slice: &str,
@@ -1598,6 +1606,7 @@ fn line_galley_colored(
     spell: Option<&Spell>,
     wrap_w: Option<f32>,
     hl_spans: Option<&[(Color32, u32)]>,
+    runs: &[(usize, usize, crate::styles::Run)],
 ) -> std::sync::Arc<egui::Galley> {
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap_w.unwrap_or(f32::INFINITY);
@@ -1624,6 +1633,7 @@ fn line_galley_colored(
             break_ligatures(&mut job);
         }
         apply_tab_stops(&mut job, th.tab_size);
+        crate::styles::apply_to_job(&mut job, runs);
         return ui.ctx().fonts_mut(|f| f.layout_job(job));
     }
     let normal = base;
@@ -1641,6 +1651,7 @@ fn line_galley_colored(
         break_ligatures(&mut job);
     }
     apply_tab_stops(&mut job, th.tab_size);
+    crate::styles::apply_to_job(&mut job, runs);
     ui.ctx().fonts_mut(|f| f.layout_job(job))
 }
 
@@ -1804,7 +1815,7 @@ fn line_galley(
     spell: Option<&Spell>,
     wrap_w: Option<f32>,
 ) -> std::sync::Arc<egui::Galley> {
-    line_galley_colored(ui, slice, th, spell, wrap_w, None)
+    line_galley_colored(ui, slice, th, spell, wrap_w, None, &[])
 }
 
 /// Byte ranges of misspelled words in the line.
@@ -1969,7 +1980,7 @@ mod tests {
                 ..Default::default()
             };
             let _ = ctx.run_ui(input, |ui| {
-                show(ui, id, &mut text, 0, &mut state, &th, false, true, None, &[], false, None);
+                show(ui, id, &mut text, 0, &mut state, &th, false, true, None, &[], false, None, &mut Default::default(), &mut |_| {});
             });
             (state.anchor, state.cursor)
         };
@@ -2022,7 +2033,7 @@ mod tests {
             };
             let _ = ctx.run_ui(input, |ui| {
                 let _ = ui.button("another focusable widget");
-                show(ui, id, &mut text, 0, &mut state, &th, false, true, None, &[], focus, None);
+                show(ui, id, &mut text, 0, &mut state, &th, false, true, None, &[], focus, None, &mut Default::default(), &mut |_| {});
             });
         };
         frame(vec![], true);

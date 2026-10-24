@@ -1,6 +1,6 @@
 # Notey Plugin API
 
-> **Implementation status (September 2026, API 2):** Rhai scripts are live
+> **Implementation status (October 2026, API 3):** Rhai scripts are live
 > in `src/plugins.rs`. They come from two places: your own scripts in
 > `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
 > Plugins window (see [`plugins/README.md`](../plugins/README.md)). The
@@ -12,6 +12,28 @@
 >
 > **Scope note:** `notey` is available in every function of a script,
 > including your own helper functions.
+
+## API 3 additions (quick reference)
+
+**Command fields** (in addition to `id`, `title`, `shortcut`, `when`):
+
+| Field | Notes |
+|---|---|
+| `menu` | `"Plugins"` (the default) or `"Format"` |
+| `group` | name of a submenu in that menu |
+| `context: true` | also show the command in the editor's right-click menu |
+| `swatch: "#rrggbb"` | show a color square before the title |
+
+**Text styles** (kept in memory while the tab is open, never written to
+the file; the host moves them when the text changes):
+
+| Call | Notes |
+|---|---|
+| `notey.editor.style_range(range, #{ fg, bg })` | `"#rrggbb"` sets the text or background color, `""` clears it, and a key that is not in the map keeps its value |
+| `notey.editor.clear_styles(range)` | removes both colors |
+
+The official Text Color plugin (`plugins/features/feature-text-color`) is
+an example of all of these.
 
 ## API 2 additions (quick reference)
 

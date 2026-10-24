@@ -11,6 +11,7 @@ mod search;
 mod session;
 mod shutdown;
 mod spell;
+mod styles;
 mod syntax;
 mod theme;
 mod theme_marketplace;

@@ -42,6 +42,7 @@ fn ctx(text: &str, sel: (usize, usize), language: Option<&str>) -> ScriptCtx {
         preview: "off".into(),
         script_name: String::new(),
         capabilities: Vec::new(),
+        styles: Vec::new(),
     }
 }
 
@@ -157,6 +158,35 @@ fn word_count_sets_a_status_item() {
     ));
     let out = host.run_event(0, event("selection_changed", None), ctx("one two three", (0, 7), None));
     assert!(matches!(out.actions.as_slice(), [HostAction::SetStatusItem(_, text, _)] if text == "2 of 3 words"));
+}
+
+#[test]
+fn text_color_registers_menus_and_styles_the_selection() {
+    use crate::styles::Change;
+    let mut host = official("feature-text-color");
+    let cmds = &host.scripts[0].commands;
+    assert_eq!(cmds.len(), 35);
+    let red = cmds.iter().find(|c| c.id == "fg:1").unwrap();
+    assert_eq!(red.title, "Red");
+    assert_eq!(red.menu, "Format");
+    assert_eq!(red.group.as_deref(), Some("Text Color"));
+    assert!(red.context);
+    assert_eq!(red.swatch, parse_color("#cd3131"));
+
+    let out = host.run_command(0, "fg:1", ctx("one two", (4, 7), None));
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+    assert_eq!(
+        out.styles,
+        vec![StyleOp { start: 4, end: 7, fg: Change::Set(parse_color("#cd3131").unwrap()), bg: Change::Keep }]
+    );
+    let out = host.run_command(0, "bg:default", ctx("one two", (0, 3), None));
+    assert_eq!(out.styles, vec![StyleOp { start: 0, end: 3, fg: Change::Keep, bg: Change::Clear }]);
+    let out = host.run_command(0, "clear", ctx("one two", (7, 0), None));
+    assert_eq!(out.styles, vec![StyleOp { start: 0, end: 7, fg: Change::Clear, bg: Change::Clear }]);
+    // no selection: nothing to color
+    let out = host.run_command(0, "fg:1", ctx("one two", (2, 2), None));
+    assert!(out.styles.is_empty());
+    assert!(out.status.is_some());
 }
 
 #[test]

@@ -6,6 +6,25 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The Text Color plugin. Right-click selected text, or open the Format menu,
+  to give the text a color or a background color. You can select one of the
+  16 terminal (ANSI) colors. The colors stay while the tab is open. Notey
+  does not save them to the file. Install the plugin from Plugins > Manage
+  Plugins > Features.
+- A Format menu. It contains Word Wrap and the commands that plugins add
+  to it.
+- Plugin API 3. A command can go in the Format menu (`menu`), in a submenu
+  (`group`), and in the editor's right-click menu (`context`). It can also
+  show a color square (`swatch`). Scripts can put colors on text with
+  `notey.editor.style_range` and remove them with
+  `notey.editor.clear_styles`.
+
+### Changed
+- Notey now shows the menu bar by default, also if you turned it off
+  before. To use the compact menu under the Notey icon again, turn off
+  "Show menu bar" in Edit > Preferences.
+
 ## [0.5.6] - 2026-10-16
 
 ### Fixed
