@@ -118,8 +118,11 @@ fn main() -> eframe::Result {
 /// such a window. The `WGPU_BACKEND` environment variable still selects a
 /// backend.
 fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
-    #[allow(unused_mut)]
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+    // The default queues 2 frames. At 60 Hz, this adds approximately 16 ms
+    // between an input and the screen, and clicks and selection feel slow.
+    // Notey uses approximately 1 ms of CPU for each frame, so 1 frame is sufficient.
+    options.surface = eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY;
     #[cfg(windows)]
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         setup.instance_descriptor.backends =

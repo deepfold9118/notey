@@ -25,6 +25,11 @@ uses [Semantic Versioning](https://semver.org/).
   before. To use the compact menu under the Notey icon again, turn off
   "Show menu bar" in Edit > Preferences.
 
+### Fixed
+- Clicks, mouse selection, and copy and paste respond faster. Notey now
+  queues one frame for the display, not two. At 60 Hz, this removes
+  approximately 16 ms of delay.
+
 ## [0.5.6] - 2026-10-16
 
 ### Fixed
