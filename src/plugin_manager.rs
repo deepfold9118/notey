@@ -313,24 +313,10 @@ impl PluginManager {
         })
     }
 
-    // ---------- window ----------
+    // ---------- Settings section ----------
 
-    pub fn window(&mut self, ctx: &egui::Context) {
-        if !self.open {
-            return;
-        }
-        let mut open = self.open;
-        egui::Window::new("Plugins")
-            .id(egui::Id::new("plugins_window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size([640.0, 480.0])
-            .show(ctx, |ui| self.window_body(ui));
-        self.open = open;
-    }
-
-    fn window_body(&mut self, ui: &mut egui::Ui) {
+    /// The plugin list, shown in the Plugins section of the Settings tab.
+    pub fn body(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             for kind in [Kind::Feature, Kind::Language, Kind::Filetype] {
                 let count = self.store.installed.iter().filter(|p| p.manifest.kind == kind).count();

@@ -73,7 +73,7 @@
       "version": "1.0.0"
     },
     {
-      "description": "Colors the selected text and its background with the 16 terminal (ANSI) colors, from the right-click menu or Format menu. The colors stay while the tab is open; they are not saved to the file.",
+      "description": "Colors the selected text and its background with the 16 terminal (ANSI) colors, from the right-click menu or Edit menu. The colors stay while the tab is open; they are not saved to the file.",
       "dir": "features/feature-text-color",
       "files": [
         {

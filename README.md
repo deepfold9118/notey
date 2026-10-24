@@ -13,9 +13,10 @@ Variable, rounded menus and dialogs, and an accent-colored selection.
 Window dragging, double-click maximize, and edge resizing are all
 implemented on top of the frameless window.
 
-By default, Notey shows a menu bar with the File, Edit, Format, View,
-Language, Plugins, and Help menus. For a more compact window, turn off
-"Show menu bar" in Edit > Preferences (Ctrl+,). Then the menus open from
+By default, Notey shows a menu bar with the File, Edit, and Help menus.
+All settings are in the Settings tab. To open it, click the gear icon at the
+bottom left, or use Edit > Settings (Ctrl+,). For a more compact window,
+turn off "Show menu bar" in Settings > Appearance. Then the menus open from
 the Notey icon in the top-left of the title bar.
 
 ## Run
@@ -39,37 +40,42 @@ starts. Closing an individual tab still prompts to save. Secondary
 
 ## Features
 
-- **Dark mode** by default (toggle in View menu; remembered between runs)
+- **Dark mode** by default (change it in Settings > Appearance; remembered between runs)
 - **Tabs** — Ctrl+N new tab, Ctrl+W close, Ctrl+Tab / Ctrl+Shift+Tab to switch,
-  middle-click a tab to close it, unsaved-changes prompt on close
+  middle-click a tab to close it, unsaved-changes prompt on close. The tabs
+  can be in the title bar or in a vertical list on the left (Settings >
+  Appearance > Tabs).
 - **Spellchecker** (plugin) — red underline on misspelled words; right-click
   a word for suggestions or "Add to dictionary"; dictionaries come from
   Language plugins
 - **Syntax highlighting** (plugins) — one File Type plugin per language (45
   available), auto-detected by file extension with a filterable language
-  picker in the status bar and a dedicated Language menu for untitled files
+  picker in the status bar
 - **Themes** — built-in Notey Dark and Light themes plus imported VS Code
   color-theme JSON/JSONC and TextMate `.tmTheme` files; workbench colors apply
   across the full Notey interface and `tokenColors` drive syntax highlighting.
   Notey can also import a copied `vscodethemes.com` URL by downloading and
   extracting the complete theme from its Visual Studio Marketplace extension;
   downloaded packages and all their theme variants remain available under
-  View > Theme > Installed Themes
+  Settings > Appearance
 - File: New Tab / New Window / Open / Save / Save As / Print / Exit
-- Edit: Undo, Redo, Cut, Copy, Paste, Delete, Find, Find Next (F3),
-  Find Previous (Shift+F3), Replace, Go To line (Ctrl+G), Select All,
-  Time/Date (F5), Preferences (Ctrl+,)
+- Edit: Undo, Redo, Cut, Copy, Paste, Delete, Select All, Find, Replace,
+  Find in Files, Go To line (Ctrl+G), Insert Time/Date (F5), the commands of
+  plugins, and Settings (Ctrl+,). Find Next is F3 and Find Previous is Shift+F3.
 - **Search**: regex find/replace via fancy-regex (lookaround +
   backreferences, `$1` capture expansion in Replace), Mark All match
   highlighting (preview editor), and **Find in Files** (Ctrl+Shift+F) —
   background directory grep respecting .gitignore, with a results panel
   and click-to-open at the matching line
-- **Preferences** (Edit > Preferences): font picker (all installed system
-  fonts, with filter), font size, line height, line numbers, word wrap,
-  font ligatures on/off — all persisted between runs
-- View: Zoom (Ctrl+Plus / Ctrl+Minus / Ctrl+0), status bar toggle,
-  spellcheck toggle, theme selection, local theme import, and
-  `vscodethemes.com` URL import
+- **Settings tab** (gear icon, Edit > Settings, or Ctrl+,): a list of
+  sections on the left and their settings on the right.
+  - Editor: font (all installed system fonts, with filter), font size, line
+    height, tab size, word wrap, line numbers, ligatures, and autosave
+  - Appearance: theme, theme import from a file or a `vscodethemes.com` URL,
+    tab position, menu bar, and status bar
+  - Spellcheck: on or off, the languages, and the personal word list
+  - Plugins: install, update, turn on or off, and remove plugins
+- Zoom: Ctrl+Plus / Ctrl+Minus / Ctrl+0. The status bar shows the zoom level.
 - Status bar: line/column, character count, zoom, and **clickable** line
   endings (CRLF / LF) and encoding (UTF-8, UTF-8 BOM, UTF-16 LE/BE, ANSI)
   selectors for the current file
@@ -78,12 +84,12 @@ starts. Closing an individual tab still prompts to save. Secondary
   offers Reload / Keep when another program modified the file (deletions
   are flagged in the status bar)
 - **Recent Files** submenu in the File menu (last 10, persisted)
-- **Autosave** (Preferences): periodically saves modified file-backed tabs
+- **Autosave** (Settings > Editor): periodically saves modified file-backed tabs
 
 ## Editor
 
 Notey's default editor is its own virtualized widget (`src/editor.rs`),
-which replaced egui's TextEdit in 0.4.0; Preferences > Editor >
+which replaced egui's TextEdit in 0.4.0; Settings > Editor >
 "Virtualized editor" switches back to the classic one. It lays out only the
 visible lines, so large files stay responsive, and it owns its
 cursor/selection/undo model (the foundation for multi-cursor, folding, and
@@ -101,7 +107,7 @@ the classic editor has it). Core logic is unit-tested (`cargo test`).
 ## Plugins
 
 Notey keeps its core minimal; everything else is a plugin, managed from
-**Plugins > Manage Plugins** in three tabs:
+**Settings > Plugins** in three tabs:
 
 - **Features** — Spellcheck, Markdown Tools (Ctrl+B/I/E/K formatting, list
   continuation, rendered and side-by-side preview), Word Count, Autocorrect,
@@ -120,8 +126,8 @@ set (Spellcheck, English (US), Markdown Tools, Word Count, and common file
 types), so everything works offline out of the box.
 
 You can also write your own Rhai scripts in `%APPDATA%\Notey\scripts`;
-they appear in the Plugins menu (Plugins > Reload Scripts picks up
-changes). See [docs/plugin-api.md](docs/plugin-api.md). Scripts can't
+their commands appear in the Edit menu (Settings > Plugins > Reload Scripts
+loads the changes). See [docs/plugin-api.md](docs/plugin-api.md). Scripts can't
 touch files or the network unless they declare a permission, and a
 failing script can never corrupt the buffer: scripts edit a snapshot that
 is only applied when they finish.

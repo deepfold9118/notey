@@ -6,6 +6,37 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- A Settings tab. It has a list of sections on the left (Editor,
+  Appearance, Spellcheck, Plugins) and the settings of the selected section
+  on the right. To open it, click the gear icon at the bottom left, use
+  Edit > Settings, or push Ctrl+,. To close it, push Ctrl+W or click its X.
+- A setting for the position of the tabs (Settings > Appearance > Tabs). The
+  tabs can be in the title bar, or in a vertical list on the left, the same
+  as the "Open Editors" list in VS Code.
+
+### Changed
+- The menu bar has only the File, Edit, and Help menus.
+  - The settings of the View menu (word wrap, line numbers, status bar,
+    spellcheck, and theme) are in the Settings tab. Zoom uses only the
+    keyboard (Ctrl+Plus, Ctrl+Minus, Ctrl+0). The status bar shows the zoom
+    level.
+  - The Language menu is gone. Use the language picker in the status bar.
+  - The commands of plugins, which were in the Format and Plugins menus,
+    are in the Edit menu. Plugins do not need a change.
+  - The plugin list, "Reload Scripts", and "Open Scripts Folder" are in
+    Settings > Plugins.
+  - "Find Next" and "Find Previous" are not in the Edit menu. Use F3 and
+    Shift+F3.
+  - "Time/Date" is now "Insert Time/Date".
+- The Settings tab replaces the Preferences window, the Plugins window, and
+  the "Get VS Code Theme" window.
+
+### Fixed
+- "Reset to defaults" turned off the menu bar, but the menu bar is on by
+  default. Now it turns the menu bar and the status bar on, and puts the
+  tabs back in the title bar.
+
 ## [0.6.0] - 2026-10-24
 
 ### Added

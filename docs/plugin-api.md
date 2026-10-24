@@ -19,8 +19,8 @@
 
 | Field | Notes |
 |---|---|
-| `menu` | `"Plugins"` (the default) or `"Format"` |
-| `group` | name of a submenu in that menu |
+| `menu` | `"Plugins"` (the default) or `"Format"`. Since Notey 0.7.0, the commands of both values go in the Edit menu. |
+| `group` | name of a submenu in the Edit menu |
 | `context: true` | also show the command in the editor's right-click menu |
 | `swatch: "#rrggbb"` | show a color square before the title |
 
@@ -104,7 +104,7 @@ unsandboxed trust replaced.
 ## Registration (manifest)
 
 Rhai: a `register()` function returning a map. WASM: an exported `register()`
-returning the same shape as JSON. Commands become Plugins-menu entries — the
+returning the same shape as JSON. Commands become Edit-menu entries — the
 `FuncItem[]` analog.
 
 ```rhai

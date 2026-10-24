@@ -17,6 +17,8 @@ use crate::session::{self, Session, SessionTab};
 use crate::spell::{self, Spell};
 use crate::theme;
 
+mod settings;
+
 // ---------- shortcuts ----------
 const SC_NEW_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::N);
 const SC_NEW_WINDOW: KeyboardShortcut =
@@ -50,6 +52,33 @@ fn editor_family() -> FontFamily {
     FontFamily::Name("editor".into())
 }
 
+/// The sections of the Settings tab, in the order of the list on the left.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsSection {
+    Editor,
+    Appearance,
+    Spellcheck,
+    Plugins,
+}
+
+impl SettingsSection {
+    const ALL: [SettingsSection; 4] = [
+        SettingsSection::Editor,
+        SettingsSection::Appearance,
+        SettingsSection::Spellcheck,
+        SettingsSection::Plugins,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            SettingsSection::Editor => "Editor",
+            SettingsSection::Appearance => "Appearance",
+            SettingsSection::Spellcheck => "Spellcheck",
+            SettingsSection::Plugins => "Plugins",
+        }
+    }
+}
+
 enum PendingClose {
     Tab(usize),
     App,
@@ -67,7 +96,6 @@ pub struct NoteyApp {
     dark: bool,
     custom_theme: Option<theme::ImportedTheme>,
     installed_themes: Vec<crate::theme_marketplace::InstalledTheme>,
-    theme_url_open: bool,
     theme_url: String,
     theme_url_error: Option<String>,
     theme_download_rx: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
@@ -76,6 +104,8 @@ pub struct NoteyApp {
     /// Show the classic menu bar row. On by default. When off, the menus
     /// open from the title-bar icon.
     show_menu: bool,
+    /// Show the tabs as a vertical list on the left, not in the title bar.
+    tabs_left: bool,
     /// Use the virtualized preview editor instead of egui's TextEdit.
     preview_editor: bool,
     editor_states: HashMap<u64, EditorState>,
@@ -104,7 +134,12 @@ pub struct NoteyApp {
     ligatures: bool,
     zoom: f32, // percent
 
-    prefs_open: bool,
+    /// The Settings tab is in the tab strip.
+    settings_open: bool,
+    /// The Settings tab is the visible tab. `active` continues to point
+    /// to a document, so the document code does not change.
+    settings_active: bool,
+    settings_section: SettingsSection,
     font_list: Option<Vec<(String, PathBuf)>>,
     font_filter: String,
 
@@ -197,13 +232,13 @@ impl NoteyApp {
             dark: true,
             custom_theme: None,
             installed_themes: Vec::new(),
-            theme_url_open: false,
             theme_url: String::new(),
             theme_url_error: None,
             theme_download_rx: None,
             word_wrap: true,
             show_status: true,
             show_menu: true,
+            tabs_left: false,
             preview_editor: true,
             editor_states: HashMap::new(),
             text_styles: HashMap::new(),
@@ -222,7 +257,9 @@ impl NoteyApp {
             show_line_numbers: false,
             ligatures: true,
             zoom: 100.0,
-            prefs_open: false,
+            settings_open: false,
+            settings_active: false,
+            settings_section: SettingsSection::Editor,
             font_list: None,
             font_filter: String::new(),
             find_open: false,
@@ -299,6 +336,7 @@ impl NoteyApp {
             // New key: the menu bar became the default in 0.6.0, so the "off"
             // saved while it was opt-in is deliberately ignored once.
             app.show_menu = get_bool("menu_bar", true);
+            app.tabs_left = get_bool("tabs_left", false);
             // New key: the virtualized editor became the default in 0.4.0, so
             // the "off" saved while it was opt-in is deliberately ignored once.
             app.preview_editor = get_bool("editor_virtualized", true);
@@ -460,6 +498,29 @@ impl NoteyApp {
         self.next_untitled += 1;
         self.docs.push(doc);
         self.active = self.docs.len() - 1;
+        self.settings_active = false;
+        self.focus_editor = true;
+    }
+
+    /// Show the Settings tab, at `section` if it is given.
+    fn open_settings(&mut self, section: Option<SettingsSection>) {
+        self.settings_open = true;
+        self.settings_active = true;
+        if let Some(section) = section {
+            self.settings_section = section;
+        }
+    }
+
+    fn close_settings(&mut self) {
+        self.settings_open = false;
+        self.settings_active = false;
+        self.focus_editor = true;
+    }
+
+    /// Show the document at `idx`.
+    fn activate_doc(&mut self, idx: usize) {
+        self.active = idx;
+        self.settings_active = false;
         self.focus_editor = true;
     }
 
@@ -494,8 +555,7 @@ impl NoteyApp {
             .iter()
             .position(|d| d.path.as_deref() == Some(&*path))
         {
-            self.active = i;
-            self.focus_editor = true;
+            self.activate_doc(i);
             self.note_recent(&path);
             return;
         }
@@ -511,8 +571,7 @@ impl NoteyApp {
                     self.docs.clear();
                 }
                 self.docs.push(doc);
-                self.active = self.docs.len() - 1;
-                self.focus_editor = true;
+                self.activate_doc(self.docs.len() - 1);
                 self.note_recent(&path);
                 self.queued_plugin_events.push((
                     "buffer_opened".to_string(),
@@ -707,7 +766,6 @@ impl NoteyApp {
                     Ok(name) => {
                         self.theme_url.clear();
                         self.theme_url_error = None;
-                        self.theme_url_open = false;
                         self.flash(format!("Theme: {name}"));
                     }
                     Err(err) => {
@@ -1340,6 +1398,14 @@ impl NoteyApp {
             prefs = i.consume_shortcut(&SC_PREFS);
         });
 
+        // A command for the document shows the document again.
+        if print || find || find_files || replace || goto || find_next || find_prev || time_date
+            || next_tab
+            || prev_tab
+        {
+            self.settings_active = false;
+        }
+
         if new_window {
             self.new_window();
         }
@@ -1356,7 +1422,11 @@ impl NoteyApp {
             self.save_doc_as(ctx, self.active);
         }
         if close_tab {
-            self.request_close_tab(self.active);
+            if self.settings_active {
+                self.close_settings();
+            } else {
+                self.request_close_tab(self.active);
+            }
         }
         if print {
             self.print_doc(ctx);
@@ -1402,7 +1472,7 @@ impl NoteyApp {
             self.active = (self.active + self.docs.len() - 1) % self.docs.len();
         }
         if prefs {
-            self.prefs_open = true;
+            self.open_settings(None);
         }
     }
 
@@ -1545,201 +1615,79 @@ impl NoteyApp {
                 }
             });
             ui.menu_button("Edit", |ui| {
-                if menu_item(ui, "Undo", "Ctrl+Z") {
-                    self.pending_events.push(key_event(Key::Z, Modifiers::CTRL));
-                }
-                if menu_item(ui, "Redo", "Ctrl+Y") {
-                    self.pending_events.push(key_event(Key::Y, Modifiers::CTRL));
-                }
-                ui.separator();
-                if menu_item(ui, "Cut", "Ctrl+X") {
-                    self.pending_events.push(egui::Event::Cut);
-                }
-                if menu_item(ui, "Copy", "Ctrl+C") {
-                    self.pending_events.push(egui::Event::Copy);
-                }
-                if menu_item(ui, "Paste", "Ctrl+V") {
-                    if let Some(s) = clipboard_text() {
-                        self.pending_events.push(egui::Event::Paste(s));
+                // The edit commands operate on a document. They are not
+                // available while the Settings tab is visible.
+                let on_doc = !self.settings_active;
+                ui.add_enabled_ui(on_doc, |ui| {
+                    if menu_item(ui, "Undo", "Ctrl+Z") {
+                        self.pending_events.push(key_event(Key::Z, Modifiers::CTRL));
                     }
-                }
-                if menu_item(ui, "Delete", "Del") {
-                    self.pending_events.push(key_event(Key::Delete, Modifiers::NONE));
-                }
-                ui.separator();
-                if menu_item(ui, "Find…", "Ctrl+F") {
-                    self.find_open = true;
-                    self.show_replace = false;
-                    self.focus_find = true;
-                }
-                if menu_item(ui, "Find Next", "F3") {
-                    self.find_next(ctx, false);
-                }
-                if menu_item(ui, "Find Previous", "Shift+F3") {
-                    self.find_next(ctx, true);
-                }
-                if menu_item(ui, "Replace…", "Ctrl+H") {
-                    self.find_open = true;
-                    self.show_replace = true;
-                    self.focus_find = true;
-                }
-                if menu_item(ui, "Find in Files…", "Ctrl+Shift+F") {
-                    self.open_fif();
-                }
-                if menu_item(ui, "Go To…", "Ctrl+G") {
-                    self.goto_open = true;
-                }
-                ui.separator();
-                if menu_item(ui, "Select All", "Ctrl+A") {
-                    let n = self.docs[self.active].text.chars().count();
-                    self.set_cursor(ctx, 0, n);
-                }
-                if menu_item(ui, "Time/Date", "F5") {
-                    self.insert_time_date(ctx);
-                }
-                ui.separator();
-                if menu_item(ui, "Preferences…", "Ctrl+,") {
-                    self.prefs_open = true;
-                }
-            });
-            ui.menu_button("Format", |ui| {
-                ui.checkbox(&mut self.word_wrap, "Word Wrap");
-                let language = self.docs[self.active].language.clone();
-                let scripts = &self.plugin_host.scripts;
-                if scripts.iter().flat_map(|s| &s.commands).any(|c| c.menu == "Format") {
+                    if menu_item(ui, "Redo", "Ctrl+Y") {
+                        self.pending_events.push(key_event(Key::Y, Modifiers::CTRL));
+                    }
                     ui.separator();
-                }
-                if let Some(run) = plugin_command_items(ui, scripts, language.as_deref(), Some("Format")) {
-                    self.pending_plugin_cmds.push(run);
-                    self.focus_editor = true;
-                }
-            });
-            ui.menu_button("View", |ui| {
-                ui.menu_button("Zoom", |ui| {
-                    if menu_item(ui, "Zoom In", "Ctrl+Plus") {
-                        self.zoom = (self.zoom + 10.0).min(500.0);
+                    if menu_item(ui, "Cut", "Ctrl+X") {
+                        self.pending_events.push(egui::Event::Cut);
                     }
-                    if menu_item(ui, "Zoom Out", "Ctrl+Minus") {
-                        self.zoom = (self.zoom - 10.0).max(10.0);
+                    if menu_item(ui, "Copy", "Ctrl+C") {
+                        self.pending_events.push(egui::Event::Copy);
                     }
-                    if menu_item(ui, "Restore Default Zoom", "Ctrl+0") {
-                        self.zoom = 100.0;
-                    }
-                });
-                ui.checkbox(&mut self.show_status, "Status Bar");
-                let mut spell_on = self.spell_enabled;
-                let spell_resp = ui
-                    .add_enabled(self.spell.available(), egui::Checkbox::new(&mut spell_on, "Spellcheck"));
-                if spell_resp.changed() {
-                    self.spell_enabled = spell_on;
-                }
-                if self.spell.available() {
-                    spell_resp.on_hover_text(format!("Languages: {}", self.spell.locales().join(", ")));
-                } else if spell_resp
-                    .on_disabled_hover_text("Install the Spellcheck feature and a language from Plugins")
-                    .clicked()
-                {
-                    self.pm.open_at(crate::packages::Kind::Feature);
-                }
-                ui.separator();
-                ui.menu_button("Theme", |ui| {
-                    if ui
-                        .selectable_label(self.custom_theme.is_none() && self.dark, "Notey Dark")
-                        .clicked()
-                    {
-                        self.use_builtin_theme(ctx, true);
-                        ui.close();
-                    }
-                    if ui
-                        .selectable_label(self.custom_theme.is_none() && !self.dark, "Notey Light")
-                        .clicked()
-                    {
-                        self.use_builtin_theme(ctx, false);
-                        ui.close();
-                    }
-                    let active_theme_path = self
-                        .custom_theme
-                        .as_ref()
-                        .map(|theme| theme.path.clone());
-                    let active_is_installed = active_theme_path.as_ref().is_some_and(|path| {
-                        self.installed_themes
-                            .iter()
-                            .any(|theme| theme.path.as_path() == path.as_path())
-                    });
-                    let mut installed_pick = None;
-                    if !self.installed_themes.is_empty() {
-                        ui.menu_button("Installed Themes", |ui| {
-                            for theme in &self.installed_themes {
-                                let active = active_theme_path
-                                    .as_ref()
-                                    .is_some_and(|path| path.as_path() == theme.path.as_path());
-                                let label = format!("{} — {}", theme.label, theme.package);
-                                if ui.selectable_label(active, label).clicked() {
-                                    installed_pick = Some(theme.path.clone());
-                                    ui.close();
-                                }
-                            }
-                        });
-                    }
-                    if let Some(path) = installed_pick {
-                        match self.activate_theme_path(ctx, &path) {
-                            Ok(name) => self.flash(format!("Theme: {name}")),
-                            Err(err) => self.flash(format!("Theme could not be loaded: {err}")),
-                        }
-                        ui.close();
-                    }
-                    if !active_is_installed {
-                        if let Some(name) = self.custom_theme.as_ref().map(|theme| theme.name.clone()) {
-                            let _ = ui.selectable_label(true, name);
+                    if menu_item(ui, "Paste", "Ctrl+V") {
+                        if let Some(s) = clipboard_text() {
+                            self.pending_events.push(egui::Event::Paste(s));
                         }
                     }
-                    ui.separator();
-                    if ui.button("Import VS Code Theme…").clicked() {
-                        ui.close();
-                        self.import_theme_dialog(ctx);
+                    if menu_item(ui, "Delete", "Del") {
+                        self.pending_events.push(key_event(Key::Delete, Modifiers::NONE));
                     }
-                    if ui.button("Get Theme from vscodethemes.com…").clicked() {
-                        self.theme_url_error = None;
-                        self.theme_url_open = true;
-                        ui.close();
+                    if menu_item(ui, "Select All", "Ctrl+A") {
+                        let n = self.docs[self.active].text.chars().count();
+                        self.set_cursor(ctx, 0, n);
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Find…", "Ctrl+F") {
+                        self.find_open = true;
+                        self.show_replace = false;
+                        self.focus_find = true;
+                    }
+                    if menu_item(ui, "Replace…", "Ctrl+H") {
+                        self.find_open = true;
+                        self.show_replace = true;
+                        self.focus_find = true;
+                    }
+                    if menu_item(ui, "Find in Files…", "Ctrl+Shift+F") {
+                        self.open_fif();
+                    }
+                    if menu_item(ui, "Go To…", "Ctrl+G") {
+                        self.goto_open = true;
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Insert Time/Date", "F5") {
+                        self.insert_time_date(ctx);
+                    }
+                    // Commands that plugins put in a menu. The "Format" and
+                    // "Plugins" menus of plugin API 3 both go here.
+                    let language = self.docs[self.active].language.clone();
+                    let scripts = &self.plugin_host.scripts;
+                    if scripts
+                        .iter()
+                        .flat_map(|s| &s.commands)
+                        .any(|c| plugins::MENUS.contains(&c.menu.as_str()))
+                    {
+                        ui.separator();
+                    }
+                    for menu in plugins::MENUS {
+                        if let Some(run) =
+                            plugin_command_items(ui, scripts, language.as_deref(), Some(menu))
+                        {
+                            self.pending_plugin_cmds.push(run);
+                            self.focus_editor = true;
+                        }
                     }
                 });
-            });
-            ui.menu_button("Language", |ui| {
-                self.language_picker_contents(ui);
-            });
-            ui.menu_button("Plugins", |ui| {
-                if ui.button("Manage Plugins…").clicked() {
-                    self.pm.open_at(crate::packages::Kind::Feature);
-                    ui.close();
-                }
                 ui.separator();
-                let language = self.docs[self.active].language.clone();
-                let run = plugin_command_items(
-                    ui,
-                    &self.plugin_host.scripts,
-                    language.as_deref(),
-                    Some("Plugins"),
-                );
-                if run.is_some() {
-                    self.focus_editor = true;
-                }
-                if !self.plugin_host.scripts.is_empty() {
-                    ui.separator();
-                }
-                if ui.button("Reload Scripts").clicked() {
-                    self.plugin_host = PluginHost::load(&self.pm.feature_scripts());
-                    let n = self.plugin_host.scripts.len();
-                    self.flash(format!("Loaded {n} script(s)"));
-                    self.surface_plugin_errors();
-                }
-                if ui.button("Open Scripts Folder").clicked() {
-                    if let Some(dir) = PluginHost::scripts_dir() {
-                        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
-                    }
-                }
-                if let Some((i, id)) = run {
-                    self.pending_plugin_cmds.push((i, id));
+                if menu_item(ui, "Settings", "Ctrl+,") {
+                    self.open_settings(None);
                 }
             });
             ui.menu_button("Help", |ui| {
@@ -1870,120 +1818,130 @@ impl NoteyApp {
             x += 30.0;
         }
 
-        // ---- tabs ----
-        let mut close_request: Option<usize> = None;
-        let mut activate: Option<usize> = None;
-        let plus_w = 30.0;
-        let tabs_avail = (caption_x0 - 60.0 - plus_w - x).max(60.0);
-        let n = self.docs.len().max(1) as f32;
-        let tab_w = (tabs_avail / n).clamp(60.0, 200.0);
-        let tab_font = FontId::new(13.0, FontFamily::Proportional);
-        for (i, doc) in self.docs.iter().enumerate() {
-            let rect = egui::Rect::from_min_size(
-                egui::pos2(x, bar.top() + 6.0),
-                egui::vec2(tab_w - 4.0, bar.height() - 12.0),
-            );
-            x += tab_w;
-            let resp = ui.interact(rect, egui::Id::new(("tab", doc.id)), egui::Sense::click());
-            let active = i == self.active;
-            if active {
-                painter.rect_filled(rect, 6.0, p.control_active);
-                painter.rect_stroke(
-                    rect,
-                    6.0,
-                    egui::Stroke::new(1.0, p.stroke),
-                    egui::StrokeKind::Inside,
+        // ---- tabs (one entry for each document, then Settings) ----
+        let mut close_request: Option<TabRef> = None;
+        let mut activate: Option<TabRef> = None;
+        let mut drag_left = x;
+        if !self.tabs_left {
+            let plus_w = 30.0;
+            let tabs_avail = (caption_x0 - 60.0 - plus_w - x).max(60.0);
+            let entries = self.tab_entries();
+            let n = entries.len().max(1) as f32;
+            let tab_w = (tabs_avail / n).clamp(60.0, 200.0);
+            let tab_font = FontId::new(13.0, FontFamily::Proportional);
+            for entry in &entries {
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(x, bar.top() + 6.0),
+                    egui::vec2(tab_w - 4.0, bar.height() - 12.0),
                 );
-            } else if resp.hovered() {
-                painter.rect_filled(rect, 6.0, p.tab_hover);
-            }
-
-            // close button (shown on active or hovered tabs, if wide enough)
-            let show_close = (active || resp.hovered()) && tab_w > 80.0;
-            let close_rect = egui::Rect::from_center_size(
-                egui::pos2(rect.right() - 14.0, rect.center().y),
-                egui::vec2(18.0, 18.0),
-            );
-            let text_right = if show_close {
-                close_rect.left() - 2.0
-            } else {
-                rect.right() - 8.0
-            };
-
-            // title (truncated)
-            let label = if doc.modified() {
-                format!("• {}", doc.title())
-            } else {
-                doc.title()
-            };
-            let text_color = if active { p.text } else { p.text_weak };
-            let mut job =
-                egui::text::LayoutJob::simple_singleline(label, tab_font.clone(), text_color);
-            job.wrap.max_width = (text_right - rect.left() - 10.0).max(10.0);
-            job.wrap.max_rows = 1;
-            job.wrap.break_anywhere = true;
-            let galley = painter.layout_job(job);
-            painter.galley(
-                egui::pos2(
-                    rect.left() + 10.0,
-                    rect.center().y - galley.size().y / 2.0,
-                ),
-                galley,
-                text_color,
-            );
-
-            if show_close {
-                let close_resp = ui.interact(
-                    close_rect,
-                    egui::Id::new(("tab_close", doc.id)),
-                    egui::Sense::click(),
-                );
-                if close_resp.hovered() {
-                    painter.rect_filled(close_rect, 4.0, p.control_hover);
+                x += tab_w;
+                let resp = ui.interact(rect, entry.id, egui::Sense::click());
+                if entry.active {
+                    painter.rect_filled(rect, 6.0, p.control_active);
+                    painter.rect_stroke(
+                        rect,
+                        6.0,
+                        egui::Stroke::new(1.0, p.stroke),
+                        egui::StrokeKind::Inside,
+                    );
+                } else if resp.hovered() {
+                    painter.rect_filled(rect, 6.0, p.tab_hover);
                 }
-                let cc = close_rect.center();
-                let cg = egui::Stroke::new(1.1, text_color);
-                painter.line_segment(
-                    [cc + egui::vec2(-3.5, -3.5), cc + egui::vec2(3.5, 3.5)],
-                    cg,
+
+                // close button (shown on active or hovered tabs, if wide enough)
+                let show_close = (entry.active || resp.hovered()) && tab_w > 80.0;
+                let close_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.right() - 14.0, rect.center().y),
+                    egui::vec2(18.0, 18.0),
                 );
-                painter.line_segment(
-                    [cc + egui::vec2(-3.5, 3.5), cc + egui::vec2(3.5, -3.5)],
-                    cg,
+                let text_right = if show_close {
+                    close_rect.left() - 2.0
+                } else {
+                    rect.right() - 8.0
+                };
+
+                // title (truncated), with a gear in front of "Settings"
+                let text_color = if entry.active { p.text } else { p.text_weak };
+                let mut text_left = rect.left() + 10.0;
+                if entry.tab == TabRef::Settings {
+                    paint_gear(
+                        &painter,
+                        egui::pos2(text_left + 6.0, rect.center().y),
+                        6.0,
+                        text_color,
+                    );
+                    text_left += 18.0;
+                }
+                let mut job = egui::text::LayoutJob::simple_singleline(
+                    entry.label.clone(),
+                    tab_font.clone(),
+                    text_color,
                 );
-                if close_resp.clicked() {
-                    close_request = Some(i);
+                job.wrap.max_width = (text_right - text_left).max(10.0);
+                job.wrap.max_rows = 1;
+                job.wrap.break_anywhere = true;
+                let galley = painter.layout_job(job);
+                painter.galley(
+                    egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    text_color,
+                );
+
+                if show_close {
+                    let close_resp =
+                        ui.interact(close_rect, entry.id.with("close"), egui::Sense::click());
+                    if close_resp.hovered() {
+                        painter.rect_filled(close_rect, 4.0, p.control_hover);
+                    }
+                    paint_cross(&painter, close_rect.center(), 3.5, text_color);
+                    if close_resp.clicked() {
+                        close_request = Some(entry.tab);
+                    }
+                }
+                if resp.clicked() && close_request.is_none() {
+                    activate = Some(entry.tab);
+                }
+                if resp.middle_clicked() {
+                    close_request = Some(entry.tab);
                 }
             }
-            if resp.clicked() && close_request.is_none() {
-                activate = Some(i);
-            }
-            if resp.middle_clicked() {
-                close_request = Some(i);
-            }
-        }
 
-        // ---- "+" new tab ----
-        let plus_rect = egui::Rect::from_min_size(
-            egui::pos2(x + 2.0, bar.top() + 8.0),
-            egui::vec2(26.0, bar.height() - 16.0),
-        );
-        let plus_resp = ui.interact(plus_rect, egui::Id::new("tab_plus"), egui::Sense::click());
-        if plus_resp.hovered() {
-            painter.rect_filled(plus_rect, 4.0, p.tab_hover);
+            // ---- "+" new tab ----
+            let plus_rect = egui::Rect::from_min_size(
+                egui::pos2(x + 2.0, bar.top() + 8.0),
+                egui::vec2(26.0, bar.height() - 16.0),
+            );
+            let plus_resp =
+                ui.interact(plus_rect, egui::Id::new("tab_plus"), egui::Sense::click());
+            if plus_resp.hovered() {
+                painter.rect_filled(plus_rect, 4.0, p.tab_hover);
+            }
+            paint_plus(&painter, plus_rect.center(), 4.5, p.text);
+            if plus_resp.clicked() {
+                self.new_tab();
+            }
+            plus_resp.on_hover_text("New tab (Ctrl+N)");
+            drag_left = plus_rect.right();
+        } else {
+            // the tabs are in the left panel: show the title of the visible tab
+            let title = self
+                .tab_entries()
+                .into_iter()
+                .find(|e| e.active)
+                .map(|e| e.label)
+                .unwrap_or_default();
+            painter.text(
+                egui::pos2(x + 4.0, bar.center().y),
+                egui::Align2::LEFT_CENTER,
+                title,
+                FontId::new(13.0, FontFamily::Proportional),
+                p.text_weak,
+            );
         }
-        let pc = plus_rect.center();
-        let pg = egui::Stroke::new(1.2, p.text);
-        painter.line_segment([pc + egui::vec2(-4.5, 0.0), pc + egui::vec2(4.5, 0.0)], pg);
-        painter.line_segment([pc + egui::vec2(0.0, -4.5), pc + egui::vec2(0.0, 4.5)], pg);
-        if plus_resp.clicked() {
-            self.new_tab();
-        }
-        plus_resp.on_hover_text("New tab (Ctrl+N)");
 
         // ---- drag region (everything between "+" and caption buttons) ----
         let drag_rect = egui::Rect::from_min_max(
-            egui::pos2(plus_rect.right() + 2.0, bar.top()),
+            egui::pos2(drag_left + 2.0, bar.top()),
             egui::pos2(caption_x0, bar.bottom()),
         );
         let drag_resp = ui.interact(
@@ -2002,12 +1960,170 @@ impl NoteyApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
 
-        if let Some(i) = activate {
-            self.active = i;
-            self.focus_editor = true;
+        self.apply_tab_clicks(activate, close_request);
+    }
+
+    /// The entries of the tab strip: the documents, then Settings if it is open.
+    fn tab_entries(&self) -> Vec<TabEntry> {
+        let mut out: Vec<TabEntry> = self
+            .docs
+            .iter()
+            .enumerate()
+            .map(|(i, doc)| TabEntry {
+                tab: TabRef::Doc(i),
+                id: egui::Id::new(("tab", doc.id)),
+                label: if doc.modified() {
+                    format!("• {}", doc.title())
+                } else {
+                    doc.title()
+                },
+                active: i == self.active && !self.settings_active,
+            })
+            .collect();
+        if self.settings_open {
+            out.push(TabEntry {
+                tab: TabRef::Settings,
+                id: egui::Id::new("tab_settings"),
+                label: "Settings".to_string(),
+                active: self.settings_active,
+            });
         }
-        if let Some(i) = close_request {
-            self.request_close_tab(i);
+        out
+    }
+
+    fn apply_tab_clicks(&mut self, activate: Option<TabRef>, close: Option<TabRef>) {
+        match activate {
+            Some(TabRef::Doc(i)) => self.activate_doc(i),
+            Some(TabRef::Settings) => self.settings_active = true,
+            None => {}
+        }
+        match close {
+            Some(TabRef::Doc(i)) => self.request_close_tab(i),
+            Some(TabRef::Settings) => self.close_settings(),
+            None => {}
+        }
+    }
+
+    /// The tabs as a vertical list on the left, with the gear at the bottom.
+    fn left_tab_panel(&mut self, root: &mut egui::Ui) {
+        let p = self.palette();
+        egui::Panel::left(egui::Id::new("tab_list"))
+            .resizable(true)
+            .default_size(200.0)
+            .min_size(120.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(p.chrome)
+                    .inner_margin(egui::Margin::symmetric(6, 6)),
+            )
+            .show(root, |ui| {
+                let mut activate: Option<TabRef> = None;
+                let mut close: Option<TabRef> = None;
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("OPEN TABS").small().color(p.text_weak));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (rect, resp) =
+                            ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_filled(rect, 4.0, p.tab_hover);
+                        }
+                        paint_plus(ui.painter(), rect.center(), 4.5, p.text);
+                        if resp.on_hover_text("New tab (Ctrl+N)").clicked() {
+                            self.new_tab();
+                        }
+                    });
+                });
+                ui.add_space(2.0);
+                // the gear row stays at the bottom; the list scrolls above it
+                let list_h = (ui.available_height() - 36.0).max(40.0);
+                egui::ScrollArea::vertical()
+                    .max_height(list_h)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for entry in self.tab_entries() {
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 26.0),
+                                egui::Sense::hover(),
+                            );
+                            let resp = ui.interact(rect, entry.id, egui::Sense::click());
+                            let painter = ui.painter();
+                            if entry.active {
+                                painter.rect_filled(rect, 4.0, p.control_active);
+                            } else if resp.hovered() {
+                                painter.rect_filled(rect, 4.0, p.tab_hover);
+                            }
+                            let color = if entry.active { p.text } else { p.text_weak };
+                            let mut text_left = rect.left() + 8.0;
+                            if entry.tab == TabRef::Settings {
+                                paint_gear(
+                                    painter,
+                                    egui::pos2(text_left + 6.0, rect.center().y),
+                                    6.0,
+                                    color,
+                                );
+                                text_left += 18.0;
+                            }
+                            let close_rect = egui::Rect::from_center_size(
+                                egui::pos2(rect.right() - 12.0, rect.center().y),
+                                egui::vec2(18.0, 18.0),
+                            );
+                            let show_close = entry.active || resp.hovered();
+                            let mut job = egui::text::LayoutJob::simple_singleline(
+                                entry.label.clone(),
+                                FontId::new(13.0, FontFamily::Proportional),
+                                color,
+                            );
+                            job.wrap.max_width = (close_rect.left() - 2.0 - text_left).max(10.0);
+                            job.wrap.max_rows = 1;
+                            job.wrap.break_anywhere = true;
+                            let galley = painter.layout_job(job);
+                            painter.galley(
+                                egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
+                                galley,
+                                color,
+                            );
+                            let mut closed = false;
+                            if show_close {
+                                let close_resp = ui.interact(
+                                    close_rect,
+                                    entry.id.with("close"),
+                                    egui::Sense::click(),
+                                );
+                                if close_resp.hovered() {
+                                    ui.painter().rect_filled(close_rect, 4.0, p.control_hover);
+                                }
+                                paint_cross(ui.painter(), close_rect.center(), 3.5, color);
+                                if close_resp.clicked() {
+                                    close = Some(entry.tab);
+                                    closed = true;
+                                }
+                            }
+                            if resp.clicked() && !closed {
+                                activate = Some(entry.tab);
+                            }
+                            if resp.middle_clicked() {
+                                close = Some(entry.tab);
+                            }
+                        }
+                    });
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    self.gear_button(ui);
+                });
+                self.apply_tab_clicks(activate, close);
+            });
+    }
+
+    /// The gear icon that opens the Settings tab.
+    fn gear_button(&mut self, ui: &mut egui::Ui) {
+        let p = self.palette();
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 22.0), egui::Sense::click());
+        if resp.hovered() {
+            ui.painter().rect_filled(rect, 4.0, p.tab_hover);
+        }
+        let color = if self.settings_active { p.text } else { p.text_weak };
+        paint_gear(ui.painter(), rect.center(), 7.0, color);
+        if resp.on_hover_text("Settings (Ctrl+,)").clicked() {
+            self.open_settings(None);
         }
     }
 
@@ -2654,6 +2770,11 @@ impl NoteyApp {
         let cur_lang = doc.language.clone();
         let zoom = self.zoom;
         ui.horizontal(|ui| {
+            // with the tabs on the left, the gear is at the bottom of the tab list
+            if !self.tabs_left {
+                self.gear_button(ui);
+                ui.separator();
+            }
             if let Some((msg, _)) = &self.status_msg {
                 ui.label(msg.clone());
             } else {
@@ -2890,217 +3011,6 @@ impl NoteyApp {
                 }
             });
         self.goto_open = open && self.goto_open;
-    }
-
-    fn theme_url_window(&mut self, ctx: &egui::Context) {
-        if !self.theme_url_open {
-            return;
-        }
-        let mut open = self.theme_url_open;
-        let downloading = self.theme_download_rx.is_some();
-        let mut start_import = false;
-        egui::Window::new("Get VS Code Theme")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(480.0)
-            .show(ctx, |ui| {
-                ui.label("Copy a theme URL from vscodethemes.com and paste it below.");
-                ui.hyperlink_to("Browse vscodethemes.com", "https://vscodethemes.com/");
-                ui.add_space(6.0);
-                let response = ui.add_enabled(
-                    !downloading,
-                    egui::TextEdit::singleline(&mut self.theme_url)
-                        .hint_text("https://vscodethemes.com/e/publisher.extension/theme")
-                        .desired_width(f32::INFINITY),
-                );
-                if let Some(error) = &self.theme_url_error {
-                    ui.colored_label(egui::Color32::from_rgb(0xF1, 0x70, 0x7B), error);
-                }
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(
-                            !downloading && !self.theme_url.trim().is_empty(),
-                            egui::Button::new(if downloading { "Downloading…" } else { "Import" }),
-                        )
-                        .clicked()
-                    {
-                        start_import = true;
-                    }
-                    if downloading {
-                        ui.spinner();
-                        ui.label("Downloading the Marketplace extension…");
-                    }
-                });
-                if response.lost_focus()
-                    && ui.input(|input| input.key_pressed(Key::Enter))
-                    && !downloading
-                    && !self.theme_url.trim().is_empty()
-                {
-                    start_import = true;
-                }
-            });
-        self.theme_url_open = open;
-        if start_import {
-            self.start_theme_url_import();
-        }
-    }
-
-    fn prefs_window(&mut self, ctx: &egui::Context) {
-        if !self.prefs_open {
-            return;
-        }
-        let mut open = self.prefs_open;
-        let fonts: Vec<(String, PathBuf)> = self.ensure_font_list().to_vec();
-        let mut font_changed: Option<PathBuf> = None;
-        let mut tab_size_changed = false;
-        egui::Window::new("Preferences")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(320.0)
-            .show(ctx, |ui| {
-                egui::Grid::new("prefs_grid")
-                    .num_columns(2)
-                    .spacing([12.0, 10.0])
-                    .show(ui, |ui| {
-                        ui.label("Font:");
-                        egui::ComboBox::from_id_salt("font_picker")
-                            .selected_text(self.editor_font.clone())
-                            .width(200.0)
-                            .show_ui(ui, |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.font_filter)
-                                        .hint_text("Filter…"),
-                                );
-                                ui.separator();
-                                let filter = self.font_filter.to_lowercase();
-                                for (name, path) in fonts.iter().filter(|(n, _)| {
-                                    filter.is_empty() || n.to_lowercase().contains(&filter)
-                                }) {
-                                    if ui
-                                        .selectable_label(self.editor_font == *name, name)
-                                        .clicked()
-                                    {
-                                        self.editor_font = name.clone();
-                                        font_changed = Some(path.clone());
-                                        ui.close();
-                                    }
-                                }
-                            });
-                        ui.end_row();
-
-                        ui.label("Font size:");
-                        ui.add(
-                            egui::DragValue::new(&mut self.font_size)
-                                .range(6.0..=72.0)
-                                .speed(0.5)
-                                .suffix(" pt"),
-                        );
-                        ui.end_row();
-
-                        ui.label("Line height:");
-                        ui.add(
-                            egui::Slider::new(&mut self.line_height, 0.8..=3.0)
-                                .step_by(0.05)
-                                .suffix("×"),
-                        );
-                        ui.end_row();
-
-                        ui.label("Tab size:");
-                        let tab_resp = ui.add(
-                            egui::DragValue::new(&mut self.tab_size)
-                                .range(1.0..=16.0)
-                                .speed(0.2)
-                                .fixed_decimals(0)
-                                .suffix(" spaces"),
-                        );
-                        if tab_resp.changed() {
-                            tab_size_changed = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Line numbers:");
-                        ui.checkbox(&mut self.show_line_numbers, "Show line numbers");
-                        ui.end_row();
-
-                        ui.label("Word wrap:");
-                        ui.checkbox(&mut self.word_wrap, "Wrap long lines");
-                        ui.end_row();
-
-                        ui.label("Ligatures:");
-                        ui.checkbox(&mut self.ligatures, "Use font ligatures")
-                            .on_hover_text(
-                                "Lets fonts such as Cascadia Code or Fira Code join characters \
-                                 like -> and != into single symbols. Has no effect on fonts \
-                                 without ligatures, such as Consolas.",
-                            );
-                        ui.end_row();
-
-                        ui.label("Autosave:");
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut self.autosave, "Save files every");
-                            ui.add_enabled(
-                                self.autosave,
-                                egui::DragValue::new(&mut self.autosave_secs)
-                                    .range(5.0..=600.0)
-                                    .speed(1.0)
-                                    .fixed_decimals(0)
-                                    .suffix(" s"),
-                            );
-                        });
-                        ui.end_row();
-
-                        ui.label("Menu bar:");
-                        ui.checkbox(&mut self.show_menu, "Show menu bar")
-                            .on_hover_text(
-                                "When off, the menus open from the Notey icon in the title bar",
-                            );
-                        ui.end_row();
-
-                        ui.label("Editor:");
-                        ui.checkbox(&mut self.preview_editor, "Virtualized editor")
-                            .on_hover_text(
-                                "Lays out only visible lines, so large files stay fast, and \
-                                 adds multi-cursor and column editing. Turn off to use the \
-                                 classic editor, which shows inline IME composition.",
-                            );
-                        ui.end_row();
-                    });
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Reset to defaults").clicked() {
-                        self.font_size = 15.0;
-                        self.line_height = 1.0;
-                        if (self.tab_size - 4.0).abs() > f32::EPSILON {
-                            self.tab_size = 4.0;
-                            tab_size_changed = true;
-                        }
-                        self.show_line_numbers = false;
-                        self.ligatures = true;
-                        self.word_wrap = true;
-                        self.show_menu = false;
-                        self.autosave = false;
-                        self.autosave_secs = 30.0;
-                        if self.editor_font != "Consolas" {
-                            self.editor_font = "Consolas".to_string();
-                            font_changed = fonts
-                                .iter()
-                                .find(|(n, _)| n == "Consolas")
-                                .map(|(_, p)| p.clone());
-                        }
-                    }
-                });
-            });
-        if let Some(path) = font_changed {
-            rebuild_fonts(ctx, Some(&path), self.tab_size);
-        } else if tab_size_changed {
-            let name = self.editor_font.clone();
-            let path = self.font_path(&name);
-            rebuild_fonts(ctx, path.as_deref(), self.tab_size);
-        }
-        self.prefs_open = open;
     }
 
     fn plugin_alert_windows(&mut self, ctx: &egui::Context) {
@@ -3446,6 +3356,11 @@ impl eframe::App for NoteyApp {
                     self.menu_bar(ctx, ui);
                 });
         }
+        // A request to show the plugin list opens the Plugins section.
+        if self.pm.open {
+            self.pm.open = false;
+            self.open_settings(Some(SettingsSection::Plugins));
+        }
         if self.show_status {
             egui::Panel::bottom(egui::Id::new("status"))
                 .resizable(false)
@@ -3458,6 +3373,9 @@ impl eframe::App for NoteyApp {
                     self.status_bar(ui);
                 });
         }
+        if self.tabs_left {
+            self.left_tab_panel(root);
+        }
         self.fif_results_panel(root, ctx);
         let central_frame = egui::Frame::new().fill(p.editor).inner_margin(egui::Margin {
             left: 8,
@@ -3468,18 +3386,19 @@ impl eframe::App for NoteyApp {
         egui::CentralPanel::default()
             .frame(central_frame)
             .show(root, |ui| {
-                self.editor(ctx, ui);
+                if self.settings_active {
+                    self.settings_view(ctx, ui);
+                } else {
+                    self.editor(ctx, ui);
+                }
             });
 
         self.handle_resize_edges(ctx);
 
         self.find_window(ctx);
         self.goto_window(ctx);
-        self.theme_url_window(ctx);
-        self.prefs_window(ctx);
         self.about_window(ctx);
         self.fif_window(ctx);
-        self.pm.window(ctx);
         self.plugin_alert_windows(ctx);
         self.reload_modal(ctx);
         self.close_confirm_modal(ctx);
@@ -3524,6 +3443,7 @@ impl eframe::App for NoteyApp {
         storage.set_string("line_numbers", b(self.show_line_numbers));
         storage.set_string("ligatures", b(self.ligatures));
         storage.set_string("menu_bar", b(self.show_menu));
+        storage.set_string("tabs_left", b(self.tabs_left));
         storage.set_string("editor_virtualized", b(self.preview_editor));
         storage.set_string("font_size", self.font_size.to_string());
         storage.set_string("zoom", self.zoom.to_string());
@@ -3630,6 +3550,43 @@ fn plugin_command_button(
         ui.close();
     }
     clicked
+}
+
+/// One entry of the tab strip.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TabRef {
+    Doc(usize),
+    Settings,
+}
+
+struct TabEntry {
+    tab: TabRef,
+    id: egui::Id,
+    label: String,
+    active: bool,
+}
+
+/// Paint a gear: a ring with 8 teeth.
+fn paint_gear(painter: &egui::Painter, c: egui::Pos2, r: f32, color: Color32) {
+    painter.circle_stroke(c, r * 0.62, egui::Stroke::new(1.3, color));
+    painter.circle_stroke(c, r * 0.22, egui::Stroke::new(1.0, color));
+    for k in 0..8 {
+        let a = k as f32 * std::f32::consts::TAU / 8.0;
+        let d = egui::vec2(a.cos(), a.sin());
+        painter.line_segment([c + d * (r * 0.62), c + d * r], egui::Stroke::new(2.2, color));
+    }
+}
+
+fn paint_cross(painter: &egui::Painter, c: egui::Pos2, h: f32, color: Color32) {
+    let s = egui::Stroke::new(1.1, color);
+    painter.line_segment([c + egui::vec2(-h, -h), c + egui::vec2(h, h)], s);
+    painter.line_segment([c + egui::vec2(-h, h), c + egui::vec2(h, -h)], s);
+}
+
+fn paint_plus(painter: &egui::Painter, c: egui::Pos2, h: f32, color: Color32) {
+    let s = egui::Stroke::new(1.2, color);
+    painter.line_segment([c + egui::vec2(-h, 0.0), c + egui::vec2(h, 0.0)], s);
+    painter.line_segment([c + egui::vec2(0.0, -h), c + egui::vec2(0.0, h)], s);
 }
 
 fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
