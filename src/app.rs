@@ -4,6 +4,7 @@
 //! [`Document`] holds the file it belongs to.
 
 mod chrome;
+mod find;
 mod settings_tab;
 
 use std::path::{Path, PathBuf};
@@ -17,6 +18,7 @@ use codemirror_commands::{
 use codemirror_state::{
     Compartment, EditorState, EditorStateConfig, Extension, TransactionSpec, ALLOW_MULTIPLE_SELECTIONS, TAB_SIZE,
 };
+use codemirror_search::{search, search_keymap, search_panel_open, SearchConfig};
 use codemirror_view::{keymap, line_numbers, line_wrapping, EditorView, KeyBinding, THEME, UPDATE_LISTENER};
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
@@ -88,6 +90,7 @@ pub fn init(cx: &mut App) {
         GpuiKeyBinding::new("f5", InsertTimeDate, None),
         GpuiKeyBinding::new("ctrl-,", OpenSettings, None),
     ]);
+    cx.bind_keys(find::bindings());
 }
 
 struct Tab {
@@ -97,6 +100,8 @@ struct Tab {
     seen: EditorState,
     /// Set by the editor's update listener when the text changes.
     doc_changed: Arc<AtomicBool>,
+    /// Counts text changes.
+    version: u64,
     modified: bool,
     chars: usize,
     line: usize,
@@ -139,6 +144,7 @@ pub struct NoteyApp {
     /// document.
     settings_active: bool,
     open_menu: Option<Menu>,
+    find: find::FindBar,
     status_msg: Option<SharedString>,
     flash_task: Option<Task<()>>,
     /// Owns the single-instance socket and the saved session. Secondary
@@ -168,6 +174,7 @@ impl NoteyApp {
         } else {
             "Segoe MDL2 Assets"
         };
+        let find = find::FindBar::new(&palette(settings.dark), cx);
         let mut app = NoteyApp {
             tabs: Vec::new(),
             active: 0,
@@ -179,6 +186,7 @@ impl NoteyApp {
             settings_open: false,
             settings_active: false,
             open_menu: None,
+            find,
             status_msg: None,
             flash_task: None,
             is_primary,
@@ -234,6 +242,11 @@ impl NoteyApp {
         let mut exts = vec![
             THEME.of(Arc::new(editor_theme(&self.palette, &self.settings))),
             TAB_SIZE.of(self.settings.tab_size),
+            search(Some(SearchConfig {
+                match_background: Some(self.palette.find_match),
+                selected_match_background: Some(self.palette.find_match_selected),
+                ..Default::default()
+            })),
         ];
         if self.settings.word_wrap {
             exts.push(line_wrapping());
@@ -249,6 +262,7 @@ impl NoteyApp {
         bindings.extend(history_keymap());
         // Tab inserts a tab, or indents a selection; Shift-Tab dedents.
         bindings.push(KeyBinding::new("Tab").run_state(insert_tab).shift_state(indent_less));
+        bindings.extend(search_keymap());
         let doc_changed = Arc::new(AtomicBool::new(false));
         let flag = doc_changed.clone();
         let extensions = Extension::list([
@@ -270,6 +284,7 @@ impl NoteyApp {
             view,
             seen: state.clone(),
             doc_changed,
+            version: 0,
             modified: false,
             chars: 0,
             line: 1,
@@ -290,9 +305,14 @@ impl NoteyApp {
             return;
         }
         let doc_changed = tab.doc_changed.swap(false, Ordering::Relaxed);
+        let was_open = search_panel_open(&tab.seen);
         tab.refresh(state, doc_changed);
         if doc_changed {
+            tab.version += 1;
             self.session_dirty = true;
+        }
+        if self.tabs.get(self.active).is_some_and(|t| t.view == *view) {
+            self.find_editor_changed(was_open, cx);
         }
         cx.notify();
     }
@@ -314,8 +334,13 @@ impl NoteyApp {
     }
 
     fn activate(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // An open find bar moves to the new tab with its query.
+        let query = self
+            .find_open(cx)
+            .then(|| codemirror_search::get_search_query(self.tabs[self.active].state(cx)));
         self.active = idx.min(self.tabs.len() - 1);
         self.settings_active = false;
+        self.carry_find(query, cx);
         self.focus_active(window, cx);
         cx.notify();
     }
@@ -586,6 +611,7 @@ impl NoteyApp {
     fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         change(&mut self.settings);
         self.palette = palette(self.settings.dark);
+        self.find.set_palette(&self.palette, cx);
         let effect = self.config.reconfigure(self.editor_config());
         for tab in &self.tabs {
             let effect = effect.clone();
@@ -704,9 +730,11 @@ impl Render for NoteyApp {
             self.settings_page(cx).into_any_element()
         } else {
             div()
+                .relative()
                 .flex_1()
                 .min_h_0()
                 .children(self.tabs.get(self.active).map(|t| t.view.clone()))
+                .children(self.find_bar(window, cx))
                 .into_any_element()
         };
         let root = div()
@@ -725,7 +753,8 @@ impl Render for NoteyApp {
             .child(div().h(px(1.)).flex_none().bg(p.stroke))
             .child(body)
             .when(self.settings.show_status, |d| d.child(self.status_bar(cx)));
-        self.register_actions(root, cx)
+        let root = self.register_actions(root, cx);
+        self.register_find_actions(root, cx)
     }
 }
 

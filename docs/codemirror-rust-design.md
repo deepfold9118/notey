@@ -376,3 +376,7 @@ with Notey's title bar, tabs, menus, status bar, Settings tab, files,
 session and single-instance forwarding, one `EditorView` per tab. Its
 progress and the features still to port are in
 [gpui-rebuild.md](gpui-rebuild.md).
+
+`@codemirror/search` is ported as `codemirror-search` (cursors, queries,
+find and replace commands, match highlighting, key bindings; the host
+draws the panel), and Notey's Find and Replace bar is built on it.

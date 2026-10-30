@@ -31,6 +31,10 @@ pub struct Palette {
     pub tab_hover: Hsla,
     /// Close-button hover (caption bar).
     pub close_hover: Hsla,
+    /// Find matches in the editor.
+    pub find_match: Hsla,
+    /// The selected find match.
+    pub find_match_selected: Hsla,
 }
 
 pub fn palette(dark: bool) -> Palette {
@@ -50,6 +54,8 @@ pub fn palette(dark: bool) -> Palette {
             caret: rgb(0x60CDFF).into(),
             tab_hover: rgb(0x2A2A2A).into(),
             close_hover: rgb(0xC42B1C).into(),
+            find_match: rgba(0xC9A22766).into(),
+            find_match_selected: rgba(0xE8892FAA).into(),
         }
     } else {
         Palette {
@@ -67,6 +73,8 @@ pub fn palette(dark: bool) -> Palette {
             caret: rgb(0x0067C0).into(),
             tab_hover: rgb(0xEAEAEA).into(),
             close_hover: rgb(0xC42B1C).into(),
+            find_match: rgba(0xFFD54F99).into(),
+            find_match_selected: rgba(0xFF9E40AA).into(),
         }
     }
 }

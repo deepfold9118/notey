@@ -15,6 +15,7 @@ Build: `cargo build` needs `codemirror-rs` next to this repository
 | `src/main.rs` | Crash log, arguments, single-instance forwarding, the GPUI window |
 | `src/app.rs` | `NoteyApp`: tabs (one `EditorView` each), files, session, actions and keys |
 | `src/app/chrome.rs` | Title bar with tabs and caption buttons, menu bar and menus, status bar |
+| `src/app/find.rs` | The find and replace bar and the Go To bar |
 | `src/app/settings_tab.rs` | The Settings tab |
 | `src/settings.rs` | Settings as `settings.json`; imports the egui version's `app.ron` once |
 | `src/theme.rs` | Fluent palettes and the editor theme made from them |
@@ -45,16 +46,23 @@ Notey.
   pickers, flash messages.
 - Settings tab: theme, menu bar, status bar, word wrap, line numbers, font
   size, line height, tab size.
+- Find and Replace on codemirror-search: a bar over the top right of the
+  editor (Ctrl+F, Ctrl+H, F3, Shift+F3, Escape) with match case, whole word
+  and regular expressions (look-around, backreferences, `$1` in the
+  replacement), Replace and Replace all, a match count, and highlighted
+  matches. Its fields are small CodeMirror editors. The query is kept per
+  tab and follows you to the next tab while the bar is open. Go To line
+  (Ctrl+G) also takes `+n`, `-n`, `n%` and `line:column`.
 - Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W,
-  Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,.
+  Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,, Ctrl+F,
+  Ctrl+H, F3, Shift+F3 and Ctrl+G. In the editor, Ctrl+D selects the next
+  occurrence of the selection and Ctrl+Shift+L all of them.
 
 ## To port from `main`
 
 Get an old module with `git show main:src/<file>`.
 
-- Find and Replace (Ctrl+F, Ctrl+H, F3), Go To line (Ctrl+G), Find in Files
-  (`search.rs` carries over as is; the UI needs CodeMirror's search package
-  or Notey's own panel).
+- Find in Files (`search.rs` carries over as is).
 - Spellcheck (`spell.rs` carries over; underlines as mark decorations,
   suggestions in a context menu).
 - Syntax highlighting (`syntax.rs`, syntect) until the port's language
