@@ -4,8 +4,8 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
+use futures::channel::mpsc::UnboundedSender;
 use interprocess::local_socket::traits::{ListenerExt, Stream as _};
 use interprocess::local_socket::{
     GenericNamespaced, ListenerOptions, Stream, ToNsName,
@@ -13,8 +13,18 @@ use interprocess::local_socket::{
 
 const SOCKET_NAME: &str = "notey-single-instance.sock";
 
-/// Paths received from other processes, drained by the UI thread each frame.
-pub type Inbox = Arc<Mutex<Vec<PathBuf>>>;
+/// The socket name. A test run with its own data folder (`NOTEY_DATA_DIR`)
+/// gets its own socket, so it neither forwards files to nor takes over from
+/// the Notey in everyday use.
+fn socket_name() -> String {
+    match std::env::var_os("NOTEY_DATA_DIR") {
+        Some(_) => format!("test-{SOCKET_NAME}"),
+        None => SOCKET_NAME.to_string(),
+    }
+}
+
+/// Paths received from other processes, for the UI thread.
+pub type Inbox = UnboundedSender<PathBuf>;
 
 /// Strip the `\\?\` verbatim prefix that `canonicalize` adds on Windows.
 pub fn clean_path(p: PathBuf) -> PathBuf {
@@ -28,7 +38,7 @@ pub fn clean_path(p: PathBuf) -> PathBuf {
 /// Try to hand `paths` to an already-running instance.
 /// Returns true if an instance accepted them (caller should exit).
 pub fn try_forward(paths: &[PathBuf]) -> bool {
-    let Ok(name) = SOCKET_NAME.to_ns_name::<GenericNamespaced>() else {
+    let Ok(name) = socket_name().to_ns_name::<GenericNamespaced>() else {
         return false;
     };
     let Ok(mut conn) = Stream::connect(name) else {
@@ -52,8 +62,8 @@ pub fn try_forward(paths: &[PathBuf]) -> bool {
 /// thread. Returns false if another instance already owns the socket (this
 /// process then simply runs standalone). `hwnd` is the main window. The
 /// listener restores it and brings it to the front when files arrive.
-pub fn start_listener(inbox: Inbox, ctx: eframe::egui::Context, hwnd: Option<isize>) -> bool {
-    let Ok(name) = SOCKET_NAME.to_ns_name::<GenericNamespaced>() else {
+pub fn start_listener(inbox: Inbox, hwnd: Option<isize>) -> bool {
+    let Ok(name) = socket_name().to_ns_name::<GenericNamespaced>() else {
         return false;
     };
     let Ok(listener) = ListenerOptions::new().name(name).create_sync() else {
@@ -67,7 +77,7 @@ pub fn start_listener(inbox: Inbox, ctx: eframe::egui::Context, hwnd: Option<isi
             for line in reader.lines().map_while(Result::ok) {
                 let line = line.trim();
                 if !line.is_empty() {
-                    inbox.lock().unwrap().push(PathBuf::from(line));
+                    let _ = inbox.unbounded_send(PathBuf::from(line));
                     got_any = true;
                 }
             }
@@ -75,7 +85,6 @@ pub fn start_listener(inbox: Inbox, ctx: eframe::egui::Context, hwnd: Option<isi
                 if let Some(hwnd) = hwnd {
                     win::activate(hwnd);
                 }
-                ctx.request_repaint();
             }
         }
     });

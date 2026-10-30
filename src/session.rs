@@ -27,7 +27,7 @@ pub struct Session {
 }
 
 fn session_file() -> Option<PathBuf> {
-    eframe::storage_dir("Notey").map(|d| d.join("session.json"))
+    crate::settings::data_dir().map(|d| d.join("session.json"))
 }
 
 pub fn load() -> Option<Session> {

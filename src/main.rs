@@ -2,41 +2,21 @@
 
 mod app;
 mod doc;
-mod editor;
 mod ipc;
-mod packages;
-mod plugin_manager;
-mod plugins;
-mod search;
 mod session;
-mod shutdown;
-mod spell;
-mod styles;
-mod syntax;
+mod settings;
 mod theme;
-mod theme_marketplace;
 
 use std::path::PathBuf;
 
-use eframe::egui;
-
-fn load_icon() -> Option<egui::IconData> {
-    let bytes = include_bytes!("../notey_icon.ico");
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let (width, height) = img.dimensions();
-    Some(egui::IconData {
-        rgba: img.into_raw(),
-        width,
-        height,
-    })
-}
+use gpui::{px, size, App, AppContext, Application, Bounds, TitlebarOptions, Window, WindowBounds, WindowOptions};
 
 /// Release builds have no console, so a panic would otherwise vanish
 /// without a trace. Append it to `%APPDATA%\Notey\crash.log`.
 fn install_crash_log() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(dir) = eframe::storage_dir("Notey").and_then(|d| d.parent().map(|p| p.to_path_buf())) {
+        if let Some(dir) = settings::data_dir().and_then(|d| d.parent().map(|p| p.to_path_buf())) {
             let location = info
                 .location()
                 .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
@@ -54,11 +34,8 @@ fn install_crash_log() {
                 env!("CARGO_PKG_VERSION"),
             );
             use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("crash.log"))
-            {
+            let _ = std::fs::create_dir_all(&dir);
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("crash.log")) {
                 let _ = f.write_all(entry.as_bytes());
             }
         }
@@ -66,75 +43,50 @@ fn install_crash_log() {
     }));
 }
 
-fn main() -> eframe::Result {
+fn main() {
     install_crash_log();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let new_window = args.iter().any(|a| a == "--new-window");
-    let paths: Vec<PathBuf> = args
-        .iter()
-        .filter(|a| !a.starts_with("--"))
-        .map(PathBuf::from)
-        .filter(|p| p.is_file())
-        .collect();
+    let paths: Vec<PathBuf> =
+        args.iter().filter(|a| !a.starts_with("--")).map(PathBuf::from).filter(|p| p.is_file()).collect();
 
     // Default behavior: open files as tabs in the running instance, if any.
     // `--new-window` (or launching with no files) always opens a new window.
     if !new_window && !paths.is_empty() && ipc::try_forward(&paths) {
-        return Ok(());
+        return;
     }
 
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1100.0, 720.0])
-        .with_min_inner_size([480.0, 320.0])
-        .with_decorations(false) // custom Fluent title bar
-        .with_title("Notey");
-    if let Some(icon) = load_icon() {
-        viewport = viewport.with_icon(icon);
-    }
-    let options = eframe::NativeOptions {
-        viewport,
-        wgpu_options: wgpu_options(),
-        ..Default::default()
-    };
-    let inbox: ipc::Inbox = Default::default();
-    eframe::run_native(
-        "Notey",
-        options,
-        Box::new(move |cc| {
-            // first instance wins the socket; later windows run standalone
-            let hwnd = main_hwnd(cc);
-            shutdown::install(hwnd);
-            let is_primary = ipc::start_listener(inbox.clone(), cc.egui_ctx.clone(), hwnd);
-            Ok(Box::new(app::NoteyApp::new(cc, paths, inbox, is_primary)))
-        }),
-    )
+    Application::new().run(move |cx: &mut App| {
+        app::init(cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1100.), px(720.)), cx))),
+            // The title bar is Notey's own, with the tabs in it.
+            titlebar: Some(TitlebarOptions { title: Some("Notey".into()), appears_transparent: true, ..Default::default() }),
+            window_min_size: Some(size(px(480.), px(320.))),
+            app_id: Some("Notey".into()),
+            ..Default::default()
+        };
+        let (inbox, received) = futures::channel::mpsc::unbounded();
+        cx.open_window(options, move |window, cx| {
+            // The first instance owns the socket; later windows run standalone.
+            let is_primary = ipc::start_listener(inbox, main_hwnd(window));
+            cx.new(|cx| app::NoteyApp::new(paths, is_primary, received, window, cx))
+        })
+        .expect("open the Notey window");
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
+        cx.activate(true);
+    });
 }
 
-/// The wgpu settings. On Windows, Notey does not use the OpenGL backend.
-/// That backend makes a hidden window on a thread that does not read its
-/// messages. Windows then reports the window as "not responding". As a
-/// result, the Restart Manager (Inno Setup upgrade) does not close Notey,
-/// and the shutdown waits for that window. DirectX 12 and Vulkan do not make
-/// such a window. The `WGPU_BACKEND` environment variable still selects a
-/// backend.
-fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
-    // The default queues 2 frames. At 60 Hz, this adds approximately 16 ms
-    // between an input and the screen, and clicks and selection feel slow.
-    // Notey uses approximately 1 ms of CPU for each frame, so 1 frame is sufficient.
-    options.surface = eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY;
-    #[cfg(windows)]
-    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
-        setup.instance_descriptor.backends =
-            eframe::wgpu::Backends::from_env().unwrap_or(eframe::wgpu::Backends::PRIMARY);
-    }
-    options
-}
-
-/// The Win32 handle of the main window, if the platform gives one.
-fn main_hwnd(cc: &eframe::CreationContext<'_>) -> Option<isize> {
+/// The Win32 handle of the window, if the platform gives one.
+fn main_hwnd(window: &Window) -> Option<isize> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    match cc.window_handle().ok()?.as_raw() {
+    match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
         _ => None,
     }

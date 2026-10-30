@@ -4,6 +4,11 @@ A native Rust notepad for Windows with dark mode, tabs, and spellcheck.
 Built with [egui/eframe](https://github.com/emilk/egui) and
 [spellbook](https://github.com/helix-editor/spellbook) (Hunspell-compatible).
 
+> **This branch (`rebuild/gpui`) rebuilds Notey on GPUI and a Rust port of
+> CodeMirror.** It is a work in progress; see
+> [docs/gpui-rebuild.md](docs/gpui-rebuild.md) for what works so far. The
+> rest of this README describes the egui version on `main`.
+
 ![Notey with three tabs open, showing syntax-highlighted Rust code in the dark Fluent theme](docs/screenshot.png)
 
 The UI is styled after Fluent / WinUI (Windows 11 Notepad): a frameless

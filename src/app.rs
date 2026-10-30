@@ -1,3843 +1,736 @@
-use std::path::PathBuf;
+//! The Notey window: a title bar with the tabs, an optional menu bar, the
+//! editor (or the Settings tab), and the status bar. Each tab owns a
+//! CodeMirror [`EditorView`]; the editor state holds the text and the
+//! [`Document`] holds the file it belongs to.
+
+mod chrome;
+mod settings_tab;
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
-use eframe::egui::{
-    self, Color32, FontFamily, FontId, Key, KeyboardShortcut, Modifiers, TextFormat,
+use codemirror_commands::{
+    default_keymap, history, history_keymap, indent_less, insert_tab, redo, select_all, undo, HistoryConfig,
 };
-use eframe::egui::text::{CCursor, CCursorRange, LayoutJob};
+use codemirror_state::{
+    Compartment, EditorState, EditorStateConfig, Extension, TransactionSpec, ALLOW_MULTIPLE_SELECTIONS, TAB_SIZE,
+};
+use codemirror_view::{keymap, line_numbers, line_wrapping, EditorView, KeyBinding, THEME, UPDATE_LISTENER};
+use futures::channel::mpsc::UnboundedReceiver;
+use futures::StreamExt;
+use gpui::{
+    actions, div, prelude::*, px, App, Context, Entity, ExternalPaths, FocusHandle, KeyBinding as GpuiKeyBinding,
+    PathPromptOptions, PromptLevel, SharedString, Subscription, Task, Window,
+};
 
-use std::collections::HashMap;
-
-use crate::doc::{Document, Encoding, LineEnding};
-use crate::editor::{self, EditorState};
-use crate::ipc::{clean_path, Inbox};
-use crate::plugins::{self, HostAction, PluginHost, ScriptCtx};
-use crate::search;
+use crate::doc::Document;
+use crate::ipc::clean_path;
 use crate::session::{self, Session, SessionTab};
-use crate::spell::{self, Spell};
-use crate::theme;
+use crate::settings::Settings;
+use crate::theme::{editor_theme, palette, Palette};
 
-mod settings;
+use chrome::Menu;
 
-// ---------- shortcuts ----------
-const SC_NEW_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::N);
-const SC_NEW_WINDOW: KeyboardShortcut =
-    KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::SHIFT), Key::N);
-const SC_OPEN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::O);
-const SC_SAVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::S);
-const SC_SAVE_AS: KeyboardShortcut =
-    KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::SHIFT), Key::S);
-const SC_CLOSE_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::W);
-const SC_PRINT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::P);
-const SC_FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::F);
-const SC_FIND_FILES: KeyboardShortcut =
-    KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::SHIFT), Key::F);
-const SC_REPLACE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::H);
-const SC_GOTO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::G);
-const SC_FIND_NEXT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F3);
-const SC_FIND_PREV: KeyboardShortcut = KeyboardShortcut::new(Modifiers::SHIFT, Key::F3);
-const SC_TIME_DATE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);
-const SC_ZOOM_IN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Plus);
-const SC_ZOOM_IN2: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Equals);
-const SC_ZOOM_OUT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Minus);
-const SC_ZOOM_RESET: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Num0);
-const SC_NEXT_TAB: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Tab);
-const SC_PREV_TAB: KeyboardShortcut =
-    KeyboardShortcut::new(Modifiers::CTRL.plus(Modifiers::SHIFT), Key::Tab);
-const SC_PREFS: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Comma);
+actions!(
+    notey,
+    [
+        NewTab,
+        NewWindow,
+        Open,
+        Save,
+        SaveAs,
+        CloseTab,
+        NextTab,
+        PrevTab,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset,
+        InsertTimeDate,
+        OpenSettings,
+        Exit,
+        Undo,
+        Redo,
+        Cut,
+        Copy,
+        Paste,
+        Delete,
+        SelectAll,
+        About,
+    ]
+);
 
-const EDITOR_FONT_KEY: &str = "editor_font";
+/// The font for menus, tabs and the status bar.
+const UI_FONT: &str = "Segoe UI";
+/// How often the primary window writes the session, so that a crash loses
+/// at most this much unsaved text.
+const SESSION_INTERVAL: Duration = Duration::from_secs(30);
+/// How long a status bar message stays.
+const FLASH_TIME: Duration = Duration::from_secs(4);
 
-fn editor_family() -> FontFamily {
-    FontFamily::Name("editor".into())
+/// Register the application's key bindings. The editor handles its own
+/// keys; these are the window's.
+pub fn init(cx: &mut App) {
+    cx.bind_keys([
+        GpuiKeyBinding::new("ctrl-n", NewTab, None),
+        GpuiKeyBinding::new("ctrl-shift-n", NewWindow, None),
+        GpuiKeyBinding::new("ctrl-o", Open, None),
+        GpuiKeyBinding::new("ctrl-s", Save, None),
+        GpuiKeyBinding::new("ctrl-shift-s", SaveAs, None),
+        GpuiKeyBinding::new("ctrl-w", CloseTab, None),
+        GpuiKeyBinding::new("ctrl-tab", NextTab, None),
+        GpuiKeyBinding::new("ctrl-shift-tab", PrevTab, None),
+        GpuiKeyBinding::new("ctrl-=", ZoomIn, None),
+        GpuiKeyBinding::new("ctrl-+", ZoomIn, None),
+        GpuiKeyBinding::new("ctrl--", ZoomOut, None),
+        GpuiKeyBinding::new("ctrl-0", ZoomReset, None),
+        GpuiKeyBinding::new("f5", InsertTimeDate, None),
+        GpuiKeyBinding::new("ctrl-,", OpenSettings, None),
+    ]);
 }
 
-/// The sections of the Settings tab, in the order of the list on the left.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SettingsSection {
-    Editor,
-    Appearance,
-    Spellcheck,
-    Plugins,
+struct Tab {
+    doc: Document,
+    view: Entity<EditorView>,
+    /// The editor state at the last check, to notice changes.
+    seen: EditorState,
+    /// Set by the editor's update listener when the text changes.
+    doc_changed: Arc<AtomicBool>,
+    modified: bool,
+    chars: usize,
+    line: usize,
+    col: usize,
+    _observe: Subscription,
 }
 
-impl SettingsSection {
-    const ALL: [SettingsSection; 4] = [
-        SettingsSection::Editor,
-        SettingsSection::Appearance,
-        SettingsSection::Spellcheck,
-        SettingsSection::Plugins,
-    ];
+impl Tab {
+    fn state<'a>(&self, cx: &'a App) -> &'a EditorState {
+        self.view.read(cx).state()
+    }
 
-    fn label(self) -> &'static str {
-        match self {
-            SettingsSection::Editor => "Editor",
-            SettingsSection::Appearance => "Appearance",
-            SettingsSection::Spellcheck => "Spellcheck",
-            SettingsSection::Plugins => "Plugins",
+    /// Recompute what the tab strip and status bar show.
+    fn refresh(&mut self, state: EditorState, doc_changed: bool) {
+        if doc_changed {
+            self.modified = self.doc.modified(state.doc());
+            self.chars = state.doc().chunks().map(|c| c.chars().count()).sum();
         }
+        let head = state.selection().main().head();
+        let line = state.doc().line_at(head);
+        self.line = line.number;
+        self.col = line.text[..head - line.from].chars().count() + 1;
+        self.seen = state;
     }
 }
 
-enum PendingClose {
-    Tab(usize),
-    App,
-}
-
 pub struct NoteyApp {
-    docs: Vec<Document>,
+    tabs: Vec<Tab>,
     active: usize,
     next_doc_id: u64,
     next_untitled: usize,
-
-    spell: Spell,
-    spell_enabled: bool,
-
-    dark: bool,
-    custom_theme: Option<theme::ImportedTheme>,
-    installed_themes: Vec<crate::theme_marketplace::InstalledTheme>,
-    theme_url: String,
-    theme_url_error: Option<String>,
-    theme_download_rx: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
-    word_wrap: bool,
-    show_status: bool,
-    /// Show the classic menu bar row. On by default. When off, the menus
-    /// open from the title-bar icon.
-    show_menu: bool,
-    /// Show the tabs as a vertical list on the left, not in the title bar.
-    tabs_left: bool,
-    /// Use the virtualized preview editor instead of egui's TextEdit.
-    preview_editor: bool,
-    editor_states: HashMap<u64, EditorState>,
-    /// Colors that plugins put on text, for each document (memory only).
-    text_styles: HashMap<u64, crate::styles::Styles>,
-    /// Tabs currently showing the rendered Markdown view instead of the
-    /// editor (session-transient, keyed by document id).
-    md_rendered: std::collections::HashSet<u64>,
-    /// Tabs showing a rendered preview beside the editor.
-    md_split: std::collections::HashSet<u64>,
-    /// Plugin status bar items: (key, text, tooltip), in insertion order.
-    status_items: Vec<(String, String, String)>,
-    /// Throttled change tracking for plugin events.
-    text_changed_pending: bool,
-    last_text_event: f64,
-    last_selection: Option<(u64, (usize, usize))>,
-    /// Text typed last frame, delivered as an `input` event this frame
-    /// (after the editor has inserted it).
-    pending_input: String,
-    md_cache: egui_commonmark::CommonMarkCache,
-    font_size: f32,
-    editor_font: String,
-    line_height: f32, // multiplier, 1.0 = font default
-    tab_size: f32,    // in space widths
-    show_line_numbers: bool,
-    ligatures: bool,
-    zoom: f32, // percent
-
+    settings: Settings,
+    palette: Palette,
+    /// The editor configuration that follows the settings (theme, wrapping,
+    /// line numbers, tab size), the same compartment in every editor.
+    config: Compartment,
     /// The Settings tab is in the tab strip.
     settings_open: bool,
-    /// The Settings tab is the visible tab. `active` continues to point
-    /// to a document, so the document code does not change.
+    /// The Settings tab is the visible tab. `active` still points to a
+    /// document.
     settings_active: bool,
-    settings_section: SettingsSection,
-    font_list: Option<Vec<(String, PathBuf)>>,
-    font_filter: String,
-
-    find_open: bool,
-    show_replace: bool,
-    find_text: String,
-    replace_text: String,
-    match_case: bool,
-    wrap_around: bool,
-    use_regex: bool,
-    regex_error: Option<String>,
-    focus_find: bool,
-    search_marks: Vec<(usize, usize)>,
-    marks_doc: u64,
-
-    goto_open: bool,
-    goto_line: String,
-    about_open: bool,
-    lang_filter: String,
-
-    // Find in Files
-    fif_open: bool,
-    fif_pattern: String,
-    fif_dir: String,
-    fif_filter: String,
-    fif_regex: bool,
-    fif_case: bool,
-    fif_error: Option<String>,
-    fif_results: Vec<search::GrepMatch>,
-    fif_rx: Option<std::sync::mpsc::Receiver<search::GrepMatch>>,
-    fif_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    fif_panel: bool,
-
-    recent_files: Vec<PathBuf>,
-    last_disk_check: f64,
-    reload_confirm: Option<u64>,
-    autosave: bool,
-    autosave_secs: f32,
-    last_autosave: f64,
-
-    pending_events: Vec<egui::Event>,
-    focus_editor: bool,
-    /// The window had OS focus in the previous frame.
-    window_focused: bool,
-    close_confirm: Option<PendingClose>,
-    allow_quit: bool,
-
-    // word under the last right-click: (char_start, char_end, word)
-    ctx_word: Option<(usize, usize, String)>,
-    ctx_suggestions: Vec<String>,
-    status_msg: Option<(String, f64)>,
-    last_title: String,
-    inbox: Inbox,
+    open_menu: Option<Menu>,
+    status_msg: Option<SharedString>,
+    flash_task: Option<Task<()>>,
     /// Owns the single-instance socket and the saved session. Secondary
     /// windows neither restore nor overwrite the session.
     is_primary: bool,
-    icon_tex: Option<egui::TextureHandle>,
-
-    plugin_host: PluginHost,
-    pm: crate::plugin_manager::PluginManager,
-    pending_plugin_cmds: Vec<(usize, String)>,
-    queued_plugin_events: Vec<(String, Option<String>)>,
-    plugin_alerts: Vec<(String, String)>,
-    ready_fired: bool,
-    last_active_doc: u64,
+    session_dirty: bool,
+    /// A secondary window with unsaved tabs may close (the user agreed).
+    allow_close: bool,
+    icon_font: SharedString,
+    focus_handle: FocusHandle,
+    last_title: String,
+    _tasks: Vec<Task<()>>,
 }
 
 impl NoteyApp {
     pub fn new(
-        cc: &eframe::CreationContext<'_>,
         paths: Vec<PathBuf>,
-        inbox: Inbox,
         is_primary: bool,
+        mut inbox: UnboundedReceiver<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> Self {
-        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        // Accessibility normally switches on only when a screen reader or
-        // other UI Automation client queries the window; this forces it on
-        // for testing that the widget tree stays valid.
-        if std::env::var_os("NOTEY_ACCESSKIT").is_some() {
-            cc.egui_ctx.enable_accesskit();
-        }
-
-        let mut app = Self {
-            docs: Vec::new(),
+        let settings = Settings::load();
+        let fonts = cx.text_system().all_font_names();
+        let icon_font = if fonts.iter().any(|f| f == "Segoe Fluent Icons") {
+            "Segoe Fluent Icons"
+        } else {
+            "Segoe MDL2 Assets"
+        };
+        let mut app = NoteyApp {
+            tabs: Vec::new(),
             active: 0,
             next_doc_id: 1,
             next_untitled: 1,
-            spell: Spell::empty(),
-            spell_enabled: true,
-            dark: true,
-            custom_theme: None,
-            installed_themes: Vec::new(),
-            theme_url: String::new(),
-            theme_url_error: None,
-            theme_download_rx: None,
-            word_wrap: true,
-            show_status: true,
-            show_menu: true,
-            tabs_left: false,
-            preview_editor: true,
-            editor_states: HashMap::new(),
-            text_styles: HashMap::new(),
-            md_rendered: std::collections::HashSet::new(),
-            md_split: std::collections::HashSet::new(),
-            status_items: Vec::new(),
-            text_changed_pending: false,
-            last_text_event: 0.0,
-            last_selection: None,
-            pending_input: String::new(),
-            md_cache: egui_commonmark::CommonMarkCache::default(),
-            font_size: 15.0,
-            editor_font: "Consolas".to_string(),
-            line_height: 1.0,
-            tab_size: 4.0,
-            show_line_numbers: false,
-            ligatures: true,
-            zoom: 100.0,
+            palette: palette(settings.dark),
+            settings,
+            config: Compartment::new(),
             settings_open: false,
             settings_active: false,
-            settings_section: SettingsSection::Editor,
-            font_list: None,
-            font_filter: String::new(),
-            find_open: false,
-            show_replace: false,
-            find_text: String::new(),
-            replace_text: String::new(),
-            match_case: false,
-            wrap_around: true,
-            use_regex: false,
-            regex_error: None,
-            focus_find: false,
-            search_marks: Vec::new(),
-            marks_doc: 0,
-            goto_open: false,
-            goto_line: String::new(),
-            about_open: false,
-            lang_filter: String::new(),
-            fif_open: false,
-            fif_pattern: String::new(),
-            fif_dir: String::new(),
-            fif_filter: String::new(),
-            fif_regex: false,
-            fif_case: false,
-            fif_error: None,
-            fif_results: Vec::new(),
-            fif_rx: None,
-            fif_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            fif_panel: false,
-            recent_files: Vec::new(),
-            last_disk_check: 0.0,
-            reload_confirm: None,
-            autosave: false,
-            autosave_secs: 30.0,
-            last_autosave: 0.0,
-            pending_events: Vec::new(),
-            focus_editor: true,
-            window_focused: false,
-            close_confirm: None,
-            allow_quit: false,
-            ctx_word: None,
-            ctx_suggestions: Vec::new(),
+            open_menu: None,
             status_msg: None,
-            last_title: String::new(),
-            inbox,
+            flash_task: None,
             is_primary,
-            icon_tex: None,
-            plugin_host: PluginHost::default(),
-            pm: crate::plugin_manager::PluginManager::new(),
-            pending_plugin_cmds: Vec::new(),
-            queued_plugin_events: Vec::new(),
-            plugin_alerts: Vec::new(),
-            ready_fired: false,
-            last_active_doc: 0,
+            session_dirty: false,
+            allow_close: false,
+            icon_font: icon_font.into(),
+            focus_handle: cx.focus_handle(),
+            last_title: String::new(),
+            _tasks: Vec::new(),
         };
-
-        PluginHost::seed_examples();
-        PluginHost::remove_legacy_markdown_script();
-        app.plugin_host = PluginHost::load(&app.pm.feature_scripts());
-        // dictionaries and grammars come from plugins; load them off-thread
-        app.pm.start_spell_load();
-        app.pm.start_syntax_build();
-        app.installed_themes = crate::theme_marketplace::installed_themes();
-
-        if let Some(storage) = cc.storage {
-            let get_bool = |k: &str, d: bool| {
-                storage.get_string(k).map(|v| v == "1").unwrap_or(d)
-            };
-            app.dark = get_bool("dark", true);
-            app.word_wrap = get_bool("word_wrap", true);
-            app.show_status = get_bool("show_status", true);
-            app.spell_enabled = get_bool("spell", true);
-            app.show_line_numbers = get_bool("line_numbers", false);
-            app.ligatures = get_bool("ligatures", true);
-            // New key: the menu bar became the default in 0.6.0, so the "off"
-            // saved while it was opt-in is deliberately ignored once.
-            app.show_menu = get_bool("menu_bar", true);
-            app.tabs_left = get_bool("tabs_left", false);
-            // New key: the virtualized editor became the default in 0.4.0, so
-            // the "off" saved while it was opt-in is deliberately ignored once.
-            app.preview_editor = get_bool("editor_virtualized", true);
-            if let Some(v) = storage.get_string("font_size").and_then(|v| v.parse().ok()) {
-                app.font_size = v;
-            }
-            if let Some(v) = storage.get_string("zoom").and_then(|v| v.parse().ok()) {
-                app.zoom = v;
-            }
-            if let Some(v) = storage.get_string("line_height").and_then(|v| v.parse().ok()) {
-                app.line_height = v;
-            }
-            if let Some(v) = storage.get_string("tab_size").and_then(|v| v.parse().ok()) {
-                app.tab_size = v;
-            }
-            if let Some(v) = storage.get_string("editor_font") {
-                if !v.is_empty() {
-                    app.editor_font = v;
-                }
-            }
-            app.autosave = get_bool("autosave", false);
-            if let Some(v) = storage.get_string("autosave_secs").and_then(|v| v.parse().ok())
-            {
-                app.autosave_secs = v;
-            }
-            if let Some(v) = storage.get_string("recent_files") {
-                if let Ok(list) = serde_json::from_str::<Vec<String>>(&v) {
-                    app.recent_files = list.into_iter().map(PathBuf::from).collect();
-                }
-            }
-            if let Some(path) = storage.get_string("theme_path").filter(|path| !path.is_empty()) {
-                match theme::load_vscode_theme(PathBuf::from(path).as_path()) {
-                    Ok(imported) => {
-                        app.dark = imported.dark;
-                        app.custom_theme = Some(imported);
-                    }
-                    Err(err) => {
-                        app.status_msg =
-                            Some((format!("Theme could not be restored: {err}"), 0.0));
-                    }
-                }
-            }
-        }
-
-        // point the "editor" font family at the saved font choice
-        let font_name = app.editor_font.clone();
-        let path = app.font_path(&font_name);
-        rebuild_fonts(&cc.egui_ctx, path.as_deref(), app.tab_size);
-
-        theme::apply_palette(&cc.egui_ctx, app.dark, app.palette());
-
-        // decode the app icon for the custom title bar
-        if let Ok(img) = image::load_from_memory(include_bytes!("../notey_icon.ico")) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let color_img = egui::ColorImage::from_rgba_unmultiplied(
-                [w as usize, h as usize],
-                rgba.as_raw(),
-            );
-            app.icon_tex = Some(cc.egui_ctx.load_texture(
-                "app_icon",
-                color_img,
-                egui::TextureOptions::LINEAR,
-            ));
-        }
-
-        // the first window restores the tabs left open last time
         if is_primary {
-            app.restore_session();
+            app.restore_session(cx);
+        }
+        for path in &paths {
+            app.open_path(path, window, cx);
+        }
+        if app.tabs.is_empty() {
+            app.new_tab(window, cx);
         }
 
-        // open files passed on the command line
-        for p in &paths {
-            app.open_path(p);
+        // Files that a second `notey.exe` forwards.
+        app._tasks.push(cx.spawn_in(window, async move |this, cx| {
+            while let Some(path) = inbox.next().await {
+                if this.update_in(cx, |this, window, cx| this.open_path(&path, window, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+        if is_primary {
+            app._tasks.push(cx.spawn(async move |this, cx| loop {
+                cx.background_executor().timer(SESSION_INTERVAL).await;
+                let alive = this.update(cx, |this, cx| {
+                    if this.session_dirty {
+                        this.save_session(cx);
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }));
         }
-        if app.docs.is_empty() {
-            app.new_tab();
-        }
+        let this = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            this.update(cx, |this, cx| this.should_close(window, cx)).unwrap_or(true)
+        });
+        app.focus_active(window, cx);
         app
     }
 
-    // ---------- session (unsaved tabs survive app close) ----------
+    // ---------- tabs ----------
 
-    fn restore_session(&mut self) {
-        let Some(session) = session::load() else { return };
-        for tab in session.tabs {
-            let id = self.next_doc_id;
-            self.next_doc_id += 1;
-            let mut doc = match (&tab.path, tab.dirty_text) {
-                (Some(path), Some(text)) => Document::restore_file(id, path, text),
-                (Some(path), None) => match Document::open(id, path) {
-                    Ok(doc) => doc,
-                    Err(_) => continue, // file vanished since last session
-                },
-                (None, Some(text)) => {
-                    let doc = Document::restore_untitled(id, tab.untitled_n, text);
-                    self.next_untitled = self.next_untitled.max(tab.untitled_n + 1);
-                    doc
-                }
-                (None, None) => continue,
-            };
-            if tab.language.is_some() {
-                doc.language = tab.language.clone();
-            }
-            self.docs.push(doc);
+    fn editor_config(&self) -> Extension {
+        let mut exts = vec![
+            THEME.of(Arc::new(editor_theme(&self.palette, &self.settings))),
+            TAB_SIZE.of(self.settings.tab_size),
+        ];
+        if self.settings.word_wrap {
+            exts.push(line_wrapping());
         }
-        if !self.docs.is_empty() {
-            self.active = session.active.min(self.docs.len() - 1);
+        if self.settings.line_numbers {
+            exts.push(line_numbers());
+        }
+        Extension::list(exts)
+    }
+
+    fn add_tab(&mut self, doc: Document, text: String, cx: &mut Context<Self>) -> usize {
+        let mut bindings = default_keymap();
+        bindings.extend(history_keymap());
+        // Tab inserts a tab, or indents a selection; Shift-Tab dedents.
+        bindings.push(KeyBinding::new("Tab").run_state(insert_tab).shift_state(indent_less));
+        let doc_changed = Arc::new(AtomicBool::new(false));
+        let flag = doc_changed.clone();
+        let extensions = Extension::list([
+            history(HistoryConfig::default()),
+            keymap(bindings),
+            ALLOW_MULTIPLE_SELECTIONS.of(true),
+            UPDATE_LISTENER.of(Arc::new(move |update: &codemirror_view::ViewUpdate| {
+                if update.doc_changed() {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            })),
+            self.config.of(self.editor_config()),
+        ]);
+        let state = EditorState::create(EditorStateConfig::new().doc(text).extensions(extensions));
+        let view = cx.new(|cx| EditorView::new(state.clone(), cx));
+        let observe = cx.observe(&view, |this, view, cx| this.editor_changed(&view, cx));
+        let mut tab = Tab {
+            doc,
+            view,
+            seen: state.clone(),
+            doc_changed,
+            modified: false,
+            chars: 0,
+            line: 1,
+            col: 1,
+            _observe: observe,
+        };
+        tab.refresh(state, true);
+        self.tabs.push(tab);
+        self.session_dirty = true;
+        self.tabs.len() - 1
+    }
+
+    /// The editor notified: if its state changed, update the tab's info.
+    fn editor_changed(&mut self, view: &Entity<EditorView>, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.view == *view) else { return };
+        let state = view.read(cx).state().clone();
+        if state.ptr_eq(&tab.seen) {
+            return;
+        }
+        let doc_changed = tab.doc_changed.swap(false, Ordering::Relaxed);
+        tab.refresh(state, doc_changed);
+        if doc_changed {
+            self.session_dirty = true;
+        }
+        cx.notify();
+    }
+
+    fn tab_index(&self, doc_id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.doc.id == doc_id)
+    }
+
+    fn new_doc_id(&mut self) -> u64 {
+        self.next_doc_id += 1;
+        self.next_doc_id - 1
+    }
+
+    fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let doc = Document::new(self.new_doc_id(), self.next_untitled);
+        self.next_untitled += 1;
+        let idx = self.add_tab(doc, String::new(), cx);
+        self.activate(idx, window, cx);
+    }
+
+    fn activate(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.active = idx.min(self.tabs.len() - 1);
+        self.settings_active = false;
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    /// Give the keyboard focus to the visible editor, or to the window
+    /// when the Settings tab is visible.
+    fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_active {
+            window.focus(&self.focus_handle);
+        } else if let Some(tab) = self.tabs.get(self.active) {
+            tab.view.read(cx).focus(window);
         }
     }
 
-    fn session_snapshot(&self) -> Session {
+    fn request_close_tab(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(idx) else { return };
+        if !tab.modified {
+            self.close_tab(idx, window, cx);
+            return;
+        }
+        let id = tab.doc.id;
+        let message = format!("Do you want to save changes to {}?", tab.doc.title());
+        let answer = window.prompt(PromptLevel::Warning, &message, None, &["Save", "Don't Save", "Cancel"], cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let close = match answer.await {
+                Ok(0) => match this.update(cx, |this, cx| this.save_by_id(id, cx)) {
+                    Ok(saving) => saving.await,
+                    Err(_) => false,
+                },
+                Ok(1) => true,
+                _ => false,
+            };
+            if close {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    if let Some(idx) = this.tab_index(id) {
+                        this.close_tab(idx, window, cx);
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn close_tab(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.tabs.remove(idx);
+        if self.tabs.is_empty() {
+            self.new_tab(window, cx);
+        }
+        if self.active > idx || self.active >= self.tabs.len() {
+            self.active = self.active.saturating_sub(1).min(self.tabs.len() - 1);
+        }
+        self.session_dirty = true;
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_open = true;
+        self.settings_active = true;
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_open = false;
+        self.settings_active = false;
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    // ---------- files ----------
+
+    fn note_recent(&mut self, path: &Path) {
+        let p = clean_path(path.to_path_buf());
+        let recent = &mut self.settings.recent_files;
+        recent.retain(|r| r != &p);
+        recent.insert(0, p);
+        recent.truncate(10);
+        self.settings.save();
+    }
+
+    /// Open `path` as a tab, or show its tab if it is already open.
+    fn open_path(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let path = clean_path(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+        if let Some(i) = self.tabs.iter().position(|t| t.doc.path.as_deref() == Some(&*path)) {
+            self.activate(i, window, cx);
+            self.note_recent(&path);
+            return;
+        }
+        match Document::open(self.new_doc_id(), &path) {
+            Ok((doc, text)) => {
+                // Replace a pristine untitled tab.
+                if self.tabs.len() == 1 && self.tabs[0].doc.path.is_none() && self.tabs[0].state(cx).doc().is_empty()
+                {
+                    self.tabs.clear();
+                }
+                let idx = self.add_tab(doc, text, cx);
+                self.activate(idx, window, cx);
+                self.note_recent(&path);
+            }
+            Err(e) => self.flash(format!("Could not open {}: {e}", path.display()), cx),
+        }
+    }
+
+    fn open_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked =
+            cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = picked.await {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    for path in paths {
+                        this.open_path(&path, window, cx);
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Write the tab to its file. Returns whether it saved.
+    fn write_tab(&mut self, idx: usize, cx: &mut Context<Self>) -> bool {
+        let text = self.tabs[idx].state(cx).doc().clone();
+        let tab = &mut self.tabs[idx];
+        match tab.doc.save(&text) {
+            Ok(()) => {
+                tab.modified = false;
+                let title = tab.doc.title();
+                if let Some(path) = tab.doc.path.clone() {
+                    self.note_recent(&path);
+                }
+                self.session_dirty = true;
+                self.flash(format!("Saved {title}"), cx);
+                true
+            }
+            Err(e) => {
+                self.flash(format!("Save failed: {e}"), cx);
+                false
+            }
+        }
+    }
+
+    /// Save the document with id `id`, asking for a file name if it has
+    /// none. The task resolves to whether it saved.
+    fn save_by_id(&mut self, id: u64, cx: &mut Context<Self>) -> Task<bool> {
+        let Some(idx) = self.tab_index(id) else { return Task::ready(false) };
+        if self.tabs[idx].doc.path.is_some() {
+            Task::ready(self.write_tab(idx, cx))
+        } else {
+            self.save_as_by_id(id, cx)
+        }
+    }
+
+    fn save_as_by_id(&mut self, id: u64, cx: &mut Context<Self>) -> Task<bool> {
+        let Some(idx) = self.tab_index(id) else { return Task::ready(false) };
+        let doc = &self.tabs[idx].doc;
+        let (dir, name) = match &doc.path {
+            Some(path) => (
+                path.parent().map(Path::to_path_buf).unwrap_or_default(),
+                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            ),
+            None => (documents_dir(), format!("{}.txt", doc.title())),
+        };
+        let picked = cx.prompt_for_new_path(&dir, Some(&name));
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(path))) = picked.await else { return false };
+            this.update(cx, |this, cx| {
+                let Some(idx) = this.tab_index(id) else { return false };
+                this.tabs[idx].doc.path = Some(path);
+                cx.notify();
+                this.write_tab(idx, cx)
+            })
+            .unwrap_or(false)
+        })
+    }
+
+    // ---------- session ----------
+
+    fn restore_session(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = session::load() else { return };
+        for tab in session.tabs {
+            let id = self.new_doc_id();
+            let (mut doc, text) = match (&tab.path, tab.dirty_text) {
+                (Some(path), Some(text)) => (Document::restore_file(id, path), text),
+                (Some(path), None) => match Document::open(id, path) {
+                    Ok(opened) => opened,
+                    Err(_) => continue, // the file is gone
+                },
+                (None, Some(text)) => {
+                    self.next_untitled = self.next_untitled.max(tab.untitled_n + 1);
+                    (Document::new(id, tab.untitled_n), text)
+                }
+                (None, None) => continue,
+            };
+            doc.language = tab.language;
+            self.add_tab(doc, text, cx);
+        }
+        if !self.tabs.is_empty() {
+            self.active = session.active.min(self.tabs.len() - 1);
+        }
+    }
+
+    fn session_snapshot(&self, cx: &App) -> Session {
         let mut tabs = Vec::new();
         let mut active = 0;
-        for (i, d) in self.docs.iter().enumerate() {
-            // skip pristine empty untitled tabs
-            if d.path.is_none() && d.text.is_empty() {
+        for (i, t) in self.tabs.iter().enumerate() {
+            let text = t.state(cx).doc();
+            // Skip pristine empty untitled tabs.
+            if t.doc.path.is_none() && text.is_empty() {
                 continue;
             }
             if i == self.active {
                 active = tabs.len();
             }
             tabs.push(SessionTab {
-                path: d.path.clone(),
-                untitled_n: d.untitled_n,
-                dirty_text: if d.modified() {
-                    Some(d.text.clone())
-                } else {
-                    None
-                },
-                language: d.language.clone(),
+                path: t.doc.path.clone(),
+                untitled_n: t.doc.untitled_n,
+                dirty_text: t.modified.then(|| text.to_string()),
+                language: t.doc.language.clone(),
             });
         }
         Session { active, tabs }
     }
 
-    // ---------- fonts ----------
+    fn save_session(&mut self, cx: &App) {
+        session::save(&self.session_snapshot(cx));
+        self.session_dirty = false;
+    }
 
-    fn ensure_font_list(&mut self) -> &[(String, PathBuf)] {
-        if self.font_list.is_none() {
-            self.font_list = Some(system_fonts());
+    /// The window's close button. The primary window keeps unsaved tabs in
+    /// the session; a secondary window asks first.
+    fn should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.settings.save();
+        if self.is_primary {
+            self.save_session(cx);
+            return true;
         }
-        self.font_list.as_deref().unwrap()
-    }
-
-    fn font_path(&mut self, name: &str) -> Option<PathBuf> {
-        let name = name.to_string();
-        self.ensure_font_list()
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map(|(_, p)| p.clone())
-    }
-
-    // ---------- document management ----------
-
-    fn new_tab(&mut self) {
-        let doc = Document::new(self.next_doc_id, self.next_untitled);
-        self.next_doc_id += 1;
-        self.next_untitled += 1;
-        self.docs.push(doc);
-        self.active = self.docs.len() - 1;
-        self.settings_active = false;
-        self.focus_editor = true;
-    }
-
-    /// Show the Settings tab, at `section` if it is given.
-    fn open_settings(&mut self, section: Option<SettingsSection>) {
-        self.settings_open = true;
-        self.settings_active = true;
-        if let Some(section) = section {
-            self.settings_section = section;
+        let unsaved = self.tabs.iter().filter(|t| t.modified).count();
+        if unsaved == 0 || self.allow_close {
+            return true;
         }
-    }
-
-    fn close_settings(&mut self) {
-        self.settings_open = false;
-        self.settings_active = false;
-        self.focus_editor = true;
-    }
-
-    /// Show the document at `idx`.
-    fn activate_doc(&mut self, idx: usize) {
-        self.active = idx;
-        self.settings_active = false;
-        self.focus_editor = true;
-    }
-
-    fn editor_id(&self) -> egui::Id {
-        egui::Id::new(("editor", self.docs[self.active].id))
-    }
-
-    fn open_dialog(&mut self) {
-        let files = rfd::FileDialog::new()
-            .add_filter("Text Documents (*.txt)", &["txt"])
-            .add_filter("All Files", &["*"])
-            .pick_files();
-        if let Some(files) = files {
-            for path in files {
-                self.open_path(&path);
-            }
-        }
-    }
-
-    fn note_recent(&mut self, path: &std::path::Path) {
-        let p = clean_path(path.to_path_buf());
-        self.recent_files.retain(|r| r != &p);
-        self.recent_files.insert(0, p);
-        self.recent_files.truncate(10);
-    }
-
-    /// Open `path` as a tab (or focus its tab if already open).
-    fn open_path(&mut self, path: &std::path::Path) {
-        let path = clean_path(path.to_path_buf());
-        if let Some(i) = self
-            .docs
-            .iter()
-            .position(|d| d.path.as_deref() == Some(&*path))
-        {
-            self.activate_doc(i);
-            self.note_recent(&path);
-            return;
-        }
-        let id = self.next_doc_id;
-        self.next_doc_id += 1;
-        match Document::open(id, &path) {
-            Ok(doc) => {
-                // replace a pristine untitled tab
-                if self.docs.len() == 1
-                    && self.docs[0].path.is_none()
-                    && self.docs[0].text.is_empty()
-                {
-                    self.docs.clear();
-                }
-                self.docs.push(doc);
-                self.activate_doc(self.docs.len() - 1);
-                self.note_recent(&path);
-                self.queued_plugin_events.push((
-                    "buffer_opened".to_string(),
-                    Some(path.display().to_string()),
-                ));
-            }
-            Err(e) => self.flash(format!("Could not open {}: {e}", path.display())),
-        }
-    }
-
-    fn save_doc(&mut self, ctx: &egui::Context, idx: usize) -> bool {
-        if self.docs[idx].path.is_none() {
-            return self.save_doc_as(ctx, idx);
-        }
-        // scripts may mutate the buffer before it hits disk
-        if idx == self.active {
-            self.fire_event(ctx, "before_save", None);
-        }
-        match self.docs[idx].save() {
-            Ok(()) => {
-                let t = self.docs[idx].title();
-                self.flash(format!("Saved {t}"));
-                if idx == self.active {
-                    let path = self.docs[idx].path.as_ref().map(|p| p.display().to_string());
-                    self.queued_plugin_events
-                        .push(("after_save".to_string(), path));
-                }
-                true
-            }
-            Err(e) => {
-                self.flash(format!("Save failed: {e}"));
-                false
-            }
-        }
-    }
-
-    fn save_doc_as(&mut self, ctx: &egui::Context, idx: usize) -> bool {
-        let suggested = self.docs[idx].title();
-        let picked = rfd::FileDialog::new()
-            .add_filter("Text Documents (*.txt)", &["txt"])
-            .add_filter("All Files", &["*"])
-            .set_file_name(format!("{suggested}.txt"))
-            .save_file();
-        if let Some(path) = picked {
-            self.docs[idx].path = Some(path.clone());
-            self.note_recent(&path);
-            self.save_doc(ctx, idx)
+        let message = if unsaved == 1 {
+            "A tab has unsaved changes.".to_string()
         } else {
-            false
-        }
-    }
-
-    fn request_close_tab(&mut self, idx: usize) {
-        if self.docs[idx].modified() {
-            self.close_confirm = Some(PendingClose::Tab(idx));
-        } else {
-            self.close_tab(idx);
-        }
-    }
-
-    fn close_tab(&mut self, idx: usize) {
-        self.docs.remove(idx);
-        if self.docs.is_empty() {
-            self.new_tab();
-        }
-        if self.active >= self.docs.len() {
-            self.active = self.docs.len() - 1;
-        }
-    }
-
-    fn print_doc(&mut self, ctx: &egui::Context) {
-        let doc = &self.docs[self.active];
-        let path = if let Some(p) = &doc.path {
-            if doc.modified() {
-                self.flash("Save the file before printing".into());
-                return;
-            }
-            p.clone()
-        } else {
-            self.flash("Save the file before printing".into());
-            return;
+            format!("{unsaved} tabs have unsaved changes.")
         };
-        let _ = ctx; // reserved
-        let quoted = path.display().to_string().replace('\'', "''");
-        let result = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                &format!("Start-Process -FilePath '{quoted}' -Verb Print"),
-            ])
-            .spawn();
-        match result {
-            Ok(_) => self.flash("Sent to printer".into()),
-            Err(e) => self.flash(format!("Print failed: {e}")),
-        }
-    }
-
-    fn new_window(&mut self) {
-        if let Ok(exe) = std::env::current_exe() {
-            let _ = std::process::Command::new(exe).spawn();
-        }
-    }
-
-    fn flash(&mut self, msg: String) {
-        self.status_msg = Some((msg, 0.0));
-    }
-
-    fn palette(&self) -> theme::Palette {
-        self.custom_theme
-            .as_ref()
-            .map(|theme| theme.palette)
-            .unwrap_or_else(|| theme::palette(self.dark))
-    }
-
-    fn apply_current_theme(&mut self, ctx: &egui::Context) {
-        theme::apply_palette(ctx, self.dark, self.palette());
-        for state in self.editor_states.values_mut() {
-            if let Some(cache) = &mut state.hl {
-                cache.invalidate_all();
-            }
-        }
-    }
-
-    fn use_builtin_theme(&mut self, ctx: &egui::Context, dark: bool) {
-        self.custom_theme = None;
-        self.dark = dark;
-        self.apply_current_theme(ctx);
-    }
-
-    fn import_theme_dialog(&mut self, ctx: &egui::Context) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("VS Code color theme", &["json", "jsonc"])
-            .add_filter("TextMate theme", &["tmTheme"])
-            .pick_file()
-        else {
-            return;
-        };
-        match self.activate_theme_path(ctx, &path) {
-            Ok(name) => self.flash(format!("Theme: {name}")),
-            Err(err) => self.flash(format!("Theme import failed: {err}")),
-        }
-    }
-
-    fn activate_theme_path(
-        &mut self,
-        ctx: &egui::Context,
-        path: &std::path::Path,
-    ) -> Result<String, String> {
-        let imported = theme::load_vscode_theme(path)?;
-        let name = imported.name.clone();
-        self.dark = imported.dark;
-        self.custom_theme = Some(imported);
-        self.apply_current_theme(ctx);
-        Ok(name)
-    }
-
-    fn start_theme_url_import(&mut self) {
-        let url = self.theme_url.trim().to_string();
-        if url.is_empty() || self.theme_download_rx.is_some() {
-            return;
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.theme_url_error = None;
-        self.theme_download_rx = Some(rx);
-        self.flash("Downloading VS Code theme…".into());
-        std::thread::spawn(move || {
-            let _ = tx.send(crate::theme_marketplace::download_theme(&url));
-        });
-    }
-
-    fn poll_theme_url_import(&mut self, ctx: &egui::Context) {
-        let outcome = self.theme_download_rx.as_ref().and_then(|rx| match rx.try_recv() {
-            Ok(result) => Some(result),
-            Err(std::sync::mpsc::TryRecvError::Empty) => None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                Some(Err("the theme download stopped unexpectedly".into()))
-            }
-        });
-        let Some(outcome) = outcome else {
-            if self.theme_download_rx.is_some() {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            }
-            return;
-        };
-        self.theme_download_rx = None;
-        match outcome {
-            Ok(path) => {
-                self.installed_themes = crate::theme_marketplace::installed_themes();
-                match self.activate_theme_path(ctx, &path) {
-                    Ok(name) => {
-                        self.theme_url.clear();
-                        self.theme_url_error = None;
-                        self.flash(format!("Theme: {name}"));
-                    }
-                    Err(err) => {
-                        self.theme_url_error = Some(err.clone());
-                        self.flash(format!("Theme import failed: {err}"));
-                    }
-                }
-            }
-            Err(err) => {
-                self.theme_url_error = Some(err.clone());
-                self.flash(format!("Theme import failed: {err}"));
-            }
-        }
-    }
-
-    // ---------- plugins ----------
-
-    fn script_snapshot(&self, ctx: &egui::Context) -> ScriptCtx {
-        let doc = &self.docs[self.active];
-        let sel = self.cursor_range(ctx).unwrap_or((0, 0));
-        ScriptCtx {
-            text: doc.text.clone(),
-            sel,
-            text_dirty: false,
-            sel_dirty: false,
-            buffers: self
-                .docs
-                .iter()
-                .enumerate()
-                .map(|(i, d)| plugins::BufInfo {
-                    id: d.id,
-                    title: d.title(),
-                    path: d.path.as_ref().map(|p| p.display().to_string()),
-                    modified: d.modified(),
-                    active: i == self.active,
-                })
-                .collect(),
-            active_id: doc.id,
-            language: doc.language.clone(),
-            config_dir: PluginHost::scripts_dir()
-                .and_then(|d| d.parent().map(|p| p.display().to_string()))
-                .unwrap_or_default(),
-            actions: Vec::new(),
-            status: None,
-            preview: self.preview_mode(doc.id).to_string(),
-            script_name: String::new(),
-            capabilities: Vec::new(),
-            styles: Vec::new(),
-        }
-    }
-
-    fn preview_mode(&self, id: u64) -> &'static str {
-        if self.md_rendered.contains(&id) {
-            "rendered"
-        } else if self.md_split.contains(&id) {
-            "split"
-        } else {
-            "off"
-        }
-    }
-
-    fn set_preview_mode(&mut self, mode: &str) {
-        let id = self.docs[self.active].id;
-        self.md_rendered.remove(&id);
-        self.md_split.remove(&id);
-        match mode {
-            "rendered" => {
-                self.md_rendered.insert(id);
-            }
-            "split" => {
-                self.md_split.insert(id);
-                self.focus_editor = true;
-            }
-            _ => self.focus_editor = true,
-        }
-    }
-
-    /// Apply a script's new text as the smallest single replacement, so
-    /// undo, scroll position and other cursors are disturbed as little as
-    /// possible.
-    fn apply_text_diff(&mut self, ctx: &egui::Context, new_text: &str) {
-        let old: Vec<char> = self.docs[self.active].text.chars().collect();
-        let new: Vec<char> = new_text.chars().collect();
-        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
-        let max_suffix = old.len().min(new.len()) - prefix;
-        let suffix = old
-            .iter()
-            .rev()
-            .zip(new.iter().rev())
-            .take(max_suffix)
-            .take_while(|(a, b)| a == b)
-            .count();
-        let insert: String = new[prefix..new.len() - suffix].iter().collect();
-        self.edit_text(ctx, (prefix, old.len() - suffix), &insert);
-    }
-
-    fn apply_script_result(&mut self, ctx: &egui::Context, out: ScriptCtx) {
-        if out.text_dirty {
-            self.apply_text_diff(ctx, &out.text);
-        }
-        if !out.styles.is_empty() {
-            // the ops use offsets into the script's text, which is now the
-            // document's text
-            let doc = &self.docs[self.active];
-            let styles = self.text_styles.entry(doc.id).or_default();
-            for op in out.styles {
-                styles.apply(&doc.text, op.start, op.end, op.fg, op.bg);
-            }
-        }
-        if out.sel_dirty {
-            self.set_cursor(ctx, out.sel.0, out.sel.1);
-        }
-        if let Some(msg) = out.status {
-            self.flash(msg);
-        }
-        for action in out.actions {
-            match action {
-                HostAction::OpenFile(p) => self.open_path(&p),
-                HostAction::NewTab => self.new_tab(),
-                HostAction::SaveActive => {
-                    self.save_doc(ctx, self.active);
-                }
-                HostAction::ActivateBuffer(id) => {
-                    if let Some(i) = self.docs.iter().position(|d| d.id == id) {
-                        self.active = i;
-                        self.focus_editor = true;
-                    }
-                }
-                HostAction::CloseBuffer(id) => {
-                    if let Some(i) = self.docs.iter().position(|d| d.id == id) {
-                        self.request_close_tab(i);
-                    }
-                }
-                HostAction::Alert(title, body) => self.plugin_alerts.push((title, body)),
-                HostAction::SetClipboard(s) => {
-                    if let Ok(mut c) = arboard::Clipboard::new() {
-                        let _ = c.set_text(s);
-                    }
-                }
-                HostAction::SetLanguage(lang) => {
-                    let valid = match &lang {
-                        None => Some(None),
-                        Some(name) => crate::syntax::global()
-                            .set
-                            .find_syntax_by_name(name)
-                            .map(|sr| Some(sr.name.clone())),
-                    };
-                    match valid {
-                        Some(l) => self.docs[self.active].language = l,
-                        None => self.flash(format!(
-                            "Unknown language: {}",
-                            lang.unwrap_or_default()
-                        )),
-                    }
-                }
-                HostAction::ToggleMarkdownPreview => {
-                    self.toggle_markdown_preview();
-                }
-                HostAction::SetPreview(mode) => self.set_preview_mode(&mode),
-                HostAction::OpenPath(path) => {
-                    // default app for the file (e.g. a browser for .html)
-                    let _ = std::process::Command::new("explorer").arg(&path).spawn();
-                }
-                HostAction::SetStatusItem(key, text, tooltip) => {
-                    match self.status_items.iter_mut().find(|(k, _, _)| *k == key) {
-                        Some(item) => {
-                            item.1 = text;
-                            item.2 = tooltip;
-                        }
-                        None => self.status_items.push((key, text, tooltip)),
-                    }
-                }
-                HostAction::ClearStatusItem(key) => {
-                    self.status_items.retain(|(k, _, _)| *k != key);
-                }
-            }
-        }
-    }
-
-    /// Flip the active tab between the raw editor and the rendered
-    /// Markdown view. Only meaningful for Markdown tabs.
-    fn toggle_markdown_preview(&mut self) {
-        let doc = &self.docs[self.active];
-        if doc.language.as_deref() != Some("Markdown") {
-            self.flash("Not a Markdown tab".to_string());
-            return;
-        }
-        let id = doc.id;
-        if self.md_rendered.contains(&id) {
-            self.md_rendered.remove(&id);
-            self.focus_editor = true;
-        } else {
-            self.md_rendered.insert(id);
-            self.md_split.remove(&id);
-        }
-    }
-
-    fn run_plugin_command(&mut self, ctx: &egui::Context, script_idx: usize, cmd_id: &str) {
-        if script_idx >= self.plugin_host.scripts.len() {
-            return;
-        }
-        let snapshot = self.script_snapshot(ctx);
-        let out = self.plugin_host.run_command(script_idx, cmd_id, snapshot);
-        self.apply_script_result(ctx, out);
-        self.surface_plugin_errors();
-    }
-
-    fn fire_event(&mut self, ctx: &egui::Context, kind: &str, path: Option<String>) {
-        let subscribed: Vec<usize> = self
-            .plugin_host
-            .scripts
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.events.contains(kind))
-            .map(|(i, _)| i)
-            .collect();
-        for idx in subscribed {
-            let snapshot = self.script_snapshot(ctx);
-            let mut event = rhai::Map::new();
-            event.insert("kind".into(), rhai::Dynamic::from(kind.to_string()));
-            event.insert(
-                "buffer_id".into(),
-                rhai::Dynamic::from(self.docs[self.active].id as i64),
-            );
-            if let Some(p) = &path {
-                // `input` events carry the typed text; the rest carry a path
-                let key = if kind == "input" { "text" } else { "path" };
-                event.insert(key.into(), rhai::Dynamic::from(p.clone()));
-            }
-            let out = self.plugin_host.run_event(idx, event, snapshot);
-            self.apply_script_result(ctx, out);
-        }
-        self.surface_plugin_errors();
-    }
-
-    fn surface_plugin_errors(&mut self) {
-        if let Some(err) = self.plugin_host.errors.pop() {
-            self.plugin_host.errors.clear();
-            self.flash(format!("Plugin error: {err}"));
-        }
-    }
-
-    // ---------- cursor / text helpers ----------
-
-    fn cursor_range(&self, ctx: &egui::Context) -> Option<(usize, usize)> {
-        if self.preview_editor {
-            let id = self.docs[self.active].id;
-            return self.editor_states.get(&id).map(|s| s.selection());
-        }
-        let state = egui::text_edit::TextEditState::load(ctx, self.editor_id())?;
-        let range = state.cursor.char_range()?;
-        let (a, b) = (
-            usize::from(range.primary.index),
-            usize::from(range.secondary.index),
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            &message,
+            Some("This window has no saved session, so closing it loses the changes."),
+            &["Close Anyway", "Cancel"],
+            cx,
         );
-        Some((a.min(b), a.max(b)))
-    }
-
-    fn set_cursor(&mut self, ctx: &egui::Context, start: usize, end: usize) {
-        if self.preview_editor {
-            let id = self.docs[self.active].id;
-            self.editor_states
-                .entry(id)
-                .or_default()
-                .set_selection(start, end);
-            self.focus_editor = true;
-            return;
-        }
-        let id = self.editor_id();
-        let mut state = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
-        state
-            .cursor
-            .set_char_range(Some(CCursorRange::two(CCursor::new(start), CCursor::new(end))));
-        state.store(ctx, id);
-        self.focus_drawn_editor(ctx);
-    }
-
-    /// Focus the editor, but only if it will be drawn this frame. Focusing
-    /// an id with no widget behind it (e.g. while the tab shows the rendered
-    /// Markdown view) makes egui report a phantom focused node, which
-    /// crashes accessibility clients (AccessKit validates the focus).
-    fn focus_drawn_editor(&self, ctx: &egui::Context) {
-        let doc_id = self.docs[self.active].id;
-        if !self.md_rendered.contains(&doc_id) {
-            let id = self.editor_id();
-            ctx.memory_mut(|m| m.request_focus(id));
-        }
-    }
-
-    fn insert_at_cursor(&mut self, ctx: &egui::Context, s: &str) {
-        let range = self.cursor_range(ctx).unwrap_or_else(|| {
-            let n = self.docs[self.active].text.chars().count();
-            (n, n)
-        });
-        self.edit_text(ctx, range, s);
-    }
-
-    fn insert_time_date(&mut self, ctx: &egui::Context) {
-        let now = chrono::Local::now();
-        let stamp = now.format("%-I:%M %p %-m/%-d/%Y").to_string();
-        self.insert_at_cursor(ctx, &stamp);
-    }
-
-    // ---------- find / replace ----------
-
-    /// Compile the Find pattern, surfacing errors in the Find window.
-    fn compiled_pattern(&mut self) -> Option<fancy_regex::Regex> {
-        let opts = search::SearchOpts {
-            regex: self.use_regex,
-            match_case: self.match_case,
-        };
-        match search::compile(&self.find_text, opts) {
-            Ok(re) => {
-                self.regex_error = None;
-                Some(re)
-            }
-            Err(e) => {
-                self.regex_error = Some(e);
-                None
-            }
-        }
-    }
-
-    fn find_next(&mut self, ctx: &egui::Context, backwards: bool) {
-        if self.find_text.is_empty() {
-            return;
-        }
-        let Some(re) = self.compiled_pattern() else { return };
-        let text = self.docs[self.active].text.clone();
-        let (sel_start, sel_end) = self.cursor_range(ctx).unwrap_or((0, 0));
-        let from = if backwards { sel_start } else { sel_end };
-        match search::find_next(&text, &re, from, backwards, self.wrap_around) {
-            Some((a, b)) => self.set_cursor(ctx, a, b),
-            None => self.flash(format!("Cannot find \"{}\"", self.find_text)),
-        }
-    }
-
-    fn replace_current(&mut self, ctx: &egui::Context) {
-        if self.find_text.is_empty() {
-            return;
-        }
-        let Some(re) = self.compiled_pattern() else { return };
-        if let Some((a, b)) = self.cursor_range(ctx) {
-            if a != b {
-                let text = self.docs[self.active].text.clone();
-                // selection must be exactly one match of the pattern
-                if search::find_next(&text, &re, a, false, false) == Some((a, b)) {
-                    let sb = char_to_byte(&text, a);
-                    let eb = char_to_byte(&text, b);
-                    let replacement = search::expand_one(
-                        &text[sb..eb],
-                        &re,
-                        &self.replace_text,
-                        self.use_regex,
-                    );
-                    self.edit_text(ctx, (a, b), &replacement);
-                }
-            }
-        }
-        self.find_next(ctx, false);
-    }
-
-    fn replace_all(&mut self, ctx: &egui::Context) {
-        if self.find_text.is_empty() {
-            return;
-        }
-        let Some(re) = self.compiled_pattern() else { return };
-        let text = self.docs[self.active].text.clone();
-        let (out, count) = search::replace_all(&text, &re, &self.replace_text, self.use_regex);
-        if count > 0 {
-            let old_n = text.chars().count();
-            self.edit_text(ctx, (0, old_n), &out);
-            self.set_cursor(ctx, 0, 0);
-        }
-        self.flash(format!("Replaced {count} occurrence(s)"));
-    }
-
-    fn mark_all(&mut self, _ctx: &egui::Context) {
-        if self.find_text.is_empty() {
-            self.search_marks.clear();
-            return;
-        }
-        let Some(re) = self.compiled_pattern() else { return };
-        let doc = &self.docs[self.active];
-        self.search_marks = search::find_all(&doc.text, &re, 5000);
-        self.marks_doc = doc.id;
-        self.flash(format!("Marked {} match(es)", self.search_marks.len()));
-    }
-
-    fn goto_line_n(&mut self, ctx: &egui::Context, n: usize) {
-        let text = self.docs[self.active].text.clone();
-        if n <= 1 {
-            self.set_cursor(ctx, 0, 0);
-            return;
-        }
-        let mut line = 1usize;
-        for (i, ch) in text.chars().enumerate() {
-            if ch == '\n' {
-                line += 1;
-                if line == n {
-                    self.set_cursor(ctx, i + 1, i + 1);
-                    return;
-                }
-            }
-        }
-        let end = text.chars().count();
-        self.set_cursor(ctx, end, end);
-    }
-
-    fn goto_line(&mut self, ctx: &egui::Context) {
-        if let Ok(n) = self.goto_line.trim().parse::<usize>() {
-            self.goto_line_n(ctx, n);
-            self.goto_open = false;
-        }
-    }
-
-    // ---------- Find in Files ----------
-
-    fn open_fif(&mut self) {
-        if self.fif_dir.trim().is_empty() {
-            if let Some(dir) = self.docs[self.active]
-                .path
-                .as_ref()
-                .and_then(|p| p.parent())
-            {
-                self.fif_dir = dir.display().to_string();
-            }
-        }
-        self.fif_open = true;
-    }
-
-    fn start_find_in_files(&mut self) {
-        self.fif_error = None;
-        if self.fif_pattern.is_empty() {
-            return;
-        }
-        let opts = search::SearchOpts {
-            regex: self.fif_regex,
-            match_case: self.fif_case,
-        };
-        let re = match search::compile(&self.fif_pattern, opts) {
-            Ok(re) => re,
-            Err(e) => {
-                self.fif_error = Some(e);
-                return;
-            }
-        };
-        let root = PathBuf::from(self.fif_dir.trim());
-        if !root.is_dir() {
-            self.fif_error = Some("Folder does not exist".to_string());
-            return;
-        }
-        // cancel any previous run
-        self.fif_cancel
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        self.fif_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let cancel = self.fif_cancel.clone();
-        let filters = self.fif_filter.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            search::grep_dir(root, re, filters, cancel, tx);
-        });
-        self.fif_rx = Some(rx);
-        self.fif_results.clear();
-        self.fif_panel = true;
-    }
-
-    fn fif_window(&mut self, ctx: &egui::Context) {
-        if !self.fif_open {
-            return;
-        }
-        let mut open = self.fif_open;
-        egui::Window::new("Find in Files")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                egui::Grid::new("fif_grid").num_columns(2).show(ui, |ui| {
-                    ui.label("Find what:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.fif_pattern)
-                            .desired_width(260.0),
-                    );
-                    ui.end_row();
-                    ui.label("In folder:");
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.fif_dir)
-                                .desired_width(220.0),
-                        );
-                        if ui.button("…").clicked() {
-                            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                                self.fif_dir = dir.display().to_string();
-                            }
-                        }
-                    });
-                    ui.end_row();
-                    ui.label("Filters:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.fif_filter)
-                            .hint_text("*.rs;*.toml (empty = all)")
-                            .desired_width(260.0),
-                    );
-                    ui.end_row();
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await == Ok(0) {
+                let _ = this.update_in(cx, |this, window, _| {
+                    this.allow_close = true;
+                    window.remove_window();
                 });
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.fif_case, "Match case");
-                    ui.checkbox(&mut self.fif_regex, "Regex");
-                });
-                if let Some(err) = &self.fif_error {
-                    ui.colored_label(Color32::from_rgb(232, 82, 82), err.clone());
-                }
-                ui.separator();
-                if ui.button("Search").clicked() {
-                    self.start_find_in_files();
-                }
-            });
-        self.fif_open = open;
+            }
+        })
+        .detach();
+        false
     }
 
-    fn fif_results_panel(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
-        if !self.fif_panel {
+    // ---------- settings ----------
+
+    /// Change the settings, then apply and save them.
+    fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
+        change(&mut self.settings);
+        self.palette = palette(self.settings.dark);
+        let effect = self.config.reconfigure(self.editor_config());
+        for tab in &self.tabs {
+            let effect = effect.clone();
+            tab.view.update(cx, |view, cx| view.dispatch_spec(TransactionSpec::new().effect(effect), cx));
+        }
+        self.settings.save();
+        cx.notify();
+    }
+
+    fn flash(&mut self, msg: String, cx: &mut Context<Self>) {
+        self.status_msg = Some(msg.into());
+        self.flash_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FLASH_TIME).await;
+            let _ = this.update(cx, |this, cx| {
+                this.status_msg = None;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    // ---------- actions ----------
+
+    /// Run `f` on the visible editor, if a document tab is visible.
+    fn with_editor(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut EditorView, &mut Context<EditorView>)) {
+        if self.settings_active {
             return;
         }
-        let p = self.palette();
-        let mut open_req: Option<(PathBuf, usize)> = None;
-        egui::Panel::bottom(egui::Id::new("fif_results"))
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(p.chrome)
-                    .inner_margin(egui::Margin::symmetric(8, 6)),
-            )
-            .show(root, |ui| {
-                ui.horizontal(|ui| {
-                    let running = self.fif_rx.is_some();
-                    let count = self.fif_results.len();
-                    ui.label(format!(
-                        "{count} result(s) for \"{}\"{}",
-                        self.fif_pattern,
-                        if running { " — searching…" } else { "" }
-                    ));
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui.small_button("Close").clicked() {
-                                self.fif_panel = false;
-                                self.fif_cancel
-                                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                            if running && ui.small_button("Stop").clicked() {
-                                self.fif_cancel
-                                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                        },
-                    );
-                });
-                ui.separator();
-                let root_dir = PathBuf::from(self.fif_dir.trim());
-                egui::ScrollArea::vertical()
-                    .max_height(220.0)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        for m in &self.fif_results {
-                            let rel = m
-                                .path
-                                .strip_prefix(&root_dir)
-                                .unwrap_or(&m.path)
-                                .display();
-                            let label = format!("{rel}:{}  {}", m.line_no, m.preview);
-                            if ui
-                                .selectable_label(false, egui::RichText::new(label).monospace().size(12.0))
-                                .clicked()
-                            {
-                                open_req = Some((m.path.clone(), m.line_no));
-                            }
-                        }
-                    });
-            });
-        if let Some((path, line)) = open_req {
-            self.open_path(&path);
-            self.goto_line_n(ctx, line);
+        if let Some(tab) = self.tabs.get(self.active) {
+            tab.view.update(cx, f);
         }
     }
 
-    // ---------- UI ----------
-
-    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let mut zoom_in = false;
-        let mut zoom_out = false;
-        let mut zoom_reset = false;
-        let mut new_tab = false;
-        let mut new_window = false;
-        let mut open = false;
-        let mut save = false;
-        let mut save_as = false;
-        let mut close_tab = false;
-        let mut print = false;
-        let mut find = false;
-        let mut find_files = false;
-        let mut replace = false;
-        let mut goto = false;
-        let mut find_next = false;
-        let mut find_prev = false;
-        let mut time_date = false;
-        let mut next_tab = false;
-        let mut prev_tab = false;
-        let mut prefs = false;
-
-        ctx.input_mut(|i| {
-            new_window = i.consume_shortcut(&SC_NEW_WINDOW);
-            new_tab = i.consume_shortcut(&SC_NEW_TAB);
-            open = i.consume_shortcut(&SC_OPEN);
-            save_as = i.consume_shortcut(&SC_SAVE_AS);
-            save = i.consume_shortcut(&SC_SAVE);
-            close_tab = i.consume_shortcut(&SC_CLOSE_TAB);
-            print = i.consume_shortcut(&SC_PRINT);
-            find_files = i.consume_shortcut(&SC_FIND_FILES);
-            find = i.consume_shortcut(&SC_FIND);
-            replace = i.consume_shortcut(&SC_REPLACE);
-            goto = i.consume_shortcut(&SC_GOTO);
-            find_prev = i.consume_shortcut(&SC_FIND_PREV);
-            find_next = i.consume_shortcut(&SC_FIND_NEXT);
-            time_date = i.consume_shortcut(&SC_TIME_DATE);
-            zoom_in = i.consume_shortcut(&SC_ZOOM_IN) || i.consume_shortcut(&SC_ZOOM_IN2);
-            zoom_out = i.consume_shortcut(&SC_ZOOM_OUT);
-            zoom_reset = i.consume_shortcut(&SC_ZOOM_RESET);
-            prev_tab = i.consume_shortcut(&SC_PREV_TAB);
-            next_tab = i.consume_shortcut(&SC_NEXT_TAB);
-            prefs = i.consume_shortcut(&SC_PREFS);
-        });
-
-        // A command for the document shows the document again.
-        if print || find || find_files || replace || goto || find_next || find_prev || time_date
-            || next_tab
-            || prev_tab
-        {
-            self.settings_active = false;
-        }
-
-        if new_window {
-            self.new_window();
-        }
-        if new_tab {
-            self.new_tab();
-        }
-        if open {
-            self.open_dialog();
-        }
-        if save {
-            self.save_doc(ctx, self.active);
-        }
-        if save_as {
-            self.save_doc_as(ctx, self.active);
-        }
-        if close_tab {
-            if self.settings_active {
-                self.close_settings();
-            } else {
-                self.request_close_tab(self.active);
-            }
-        }
-        if print {
-            self.print_doc(ctx);
-        }
-        if find {
-            self.find_open = true;
-            self.show_replace = false;
-            self.focus_find = true;
-        }
-        if find_files {
-            self.open_fif();
-        }
-        if replace {
-            self.find_open = true;
-            self.show_replace = true;
-            self.focus_find = true;
-        }
-        if goto {
-            self.goto_open = true;
-        }
-        if find_next {
-            self.find_next(ctx, false);
-        }
-        if find_prev {
-            self.find_next(ctx, true);
-        }
-        if time_date {
-            self.insert_time_date(ctx);
-        }
-        if zoom_in {
-            self.zoom = (self.zoom + 10.0).min(500.0);
-        }
-        if zoom_out {
-            self.zoom = (self.zoom - 10.0).max(10.0);
-        }
-        if zoom_reset {
-            self.zoom = 100.0;
-        }
-        if next_tab && self.docs.len() > 1 {
-            self.active = (self.active + 1) % self.docs.len();
-        }
-        if prev_tab && self.docs.len() > 1 {
-            self.active = (self.active + self.docs.len() - 1) % self.docs.len();
-        }
-        if prefs {
-            self.open_settings(None);
-        }
-    }
-
-    /// Consume manifest-declared plugin shortcuts. Must run BEFORE the
-    /// built-in shortcuts: egui's `matches_logically` ignores extra pressed
-    /// modifiers, so Ctrl+Alt+S would otherwise be swallowed by Ctrl+S.
-    /// Offer unmodified key presses (e.g. Enter) to scripts that registered
-    /// a key hook; a script returning true consumes the key.
-    fn handle_plugin_keys(&mut self, ctx: &egui::Context) {
-        if !ctx.memory(|m| m.has_focus(self.editor_id())) {
-            return;
-        }
-        let language = self.docs[self.active].language.clone();
-        let hooks: Vec<(usize, Key)> = self
-            .plugin_host
-            .scripts
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| {
-                let language = language.clone();
-                s.keys
-                    .iter()
-                    .filter(move |(_, w)| w.matches(language.as_deref(), true))
-                    .map(move |(k, _)| (i, *k))
-            })
-            .collect();
-        for (i, key) in hooks {
-            let pressed = ctx.input(|inp| inp.modifiers.is_none() && inp.key_pressed(key));
-            if !pressed {
-                continue;
-            }
-            let snapshot = self.script_snapshot(ctx);
-            let (out, handled) = self.plugin_host.run_key(i, key.name(), snapshot);
-            if handled {
-                ctx.input_mut(|inp| inp.consume_key(Modifiers::NONE, key));
-            }
-            self.apply_script_result(ctx, out);
-            self.surface_plugin_errors();
-            if handled {
-                break;
-            }
-        }
-    }
-
-    fn handle_plugin_shortcuts(&mut self, ctx: &egui::Context) {
-        let language = self.docs[self.active].language.clone();
-        let focused = ctx.memory(|m| m.has_focus(self.editor_id()));
-        let plugin_shortcuts: Vec<(usize, String, KeyboardShortcut)> = self
-            .plugin_host
-            .scripts
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| {
-                let language = language.clone();
-                s.commands.iter().filter_map(move |c| {
-                    c.when
-                        .matches(language.as_deref(), focused)
-                        .then_some(())
-                        .and(c.shortcut.map(|sc| (i, c.id.clone(), sc)))
-                })
-            })
-            .collect();
-        for (i, id, sc) in plugin_shortcuts {
-            if ctx.input_mut(|inp| inp.consume_shortcut(&sc)) {
-                self.pending_plugin_cmds.push((i, id));
-            }
-        }
-    }
-
-    fn menu_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        // flat, Fluent-style top-level menu buttons
-        ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-        egui::MenuBar::new().ui(ui, |ui| {
-            self.menus(ctx, ui);
-        });
-    }
-
-    /// The File/Edit/View/Help menus — hosted either in the menu bar row or
-    /// in the popup under the title-bar icon.
-    fn menus(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        {
-            ui.menu_button("File", |ui| {
-                if menu_item(ui, "New Tab", "Ctrl+N") {
-                    self.new_tab();
+    fn register_actions(&self, root: gpui::Stateful<gpui::Div>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        root.on_action(cx.listener(|this, _: &NewTab, window, cx| this.new_tab(window, cx)))
+            .on_action(cx.listener(|_, _: &NewWindow, _, _| {
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).arg("--new-window").spawn();
                 }
-                if menu_item(ui, "New Window", "Ctrl+Shift+N") {
-                    self.new_window();
+            }))
+            .on_action(cx.listener(|this, _: &Open, window, cx| this.open_dialog(window, cx)))
+            .on_action(cx.listener(|this, _: &Save, _, cx| {
+                if let Some(tab) = this.tabs.get(this.active) {
+                    this.save_by_id(tab.doc.id, cx).detach();
                 }
-                if menu_item(ui, "Open…", "Ctrl+O") {
-                    self.open_dialog();
+            }))
+            .on_action(cx.listener(|this, _: &SaveAs, _, cx| {
+                if let Some(tab) = this.tabs.get(this.active) {
+                    this.save_as_by_id(tab.doc.id, cx).detach();
                 }
-                ui.menu_button("Open Recent", |ui| {
-                    ui.set_min_width(180.0);
-                    if self.recent_files.is_empty() {
-                        ui.label(egui::RichText::new("(empty)").weak());
-                    }
-                    let mut open_req: Option<PathBuf> = None;
-                    for p in &self.recent_files {
-                        let name = p
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| p.display().to_string());
-                        if ui
-                            .button(name)
-                            .on_hover_text(p.display().to_string())
-                            .clicked()
-                        {
-                            open_req = Some(p.clone());
-                            ui.close();
-                        }
-                    }
-                    if !self.recent_files.is_empty() {
-                        ui.separator();
-                        if ui.button("Clear Recently Opened").clicked() {
-                            self.recent_files.clear();
-                            ui.close();
-                        }
-                    }
-                    if let Some(p) = open_req {
-                        self.open_path(&p);
-                    }
-                });
-                if menu_item(ui, "Save", "Ctrl+S") {
-                    self.save_doc(ctx, self.active);
-                }
-                if menu_item(ui, "Save As…", "Ctrl+Shift+S") {
-                    self.save_doc_as(ctx, self.active);
-                }
-                ui.separator();
-                if menu_item(ui, "Print…", "Ctrl+P") {
-                    self.print_doc(ctx);
-                }
-                ui.separator();
-                if menu_item(ui, "Close Tab", "Ctrl+W") {
-                    self.request_close_tab(self.active);
-                }
-                if ui.button("Exit").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-            ui.menu_button("Edit", |ui| {
-                // The edit commands operate on a document. They are not
-                // available while the Settings tab is visible.
-                let on_doc = !self.settings_active;
-                ui.add_enabled_ui(on_doc, |ui| {
-                    if menu_item(ui, "Undo", "Ctrl+Z") {
-                        self.pending_events.push(key_event(Key::Z, Modifiers::CTRL));
-                    }
-                    if menu_item(ui, "Redo", "Ctrl+Y") {
-                        self.pending_events.push(key_event(Key::Y, Modifiers::CTRL));
-                    }
-                    ui.separator();
-                    if menu_item(ui, "Cut", "Ctrl+X") {
-                        self.pending_events.push(egui::Event::Cut);
-                    }
-                    if menu_item(ui, "Copy", "Ctrl+C") {
-                        self.pending_events.push(egui::Event::Copy);
-                    }
-                    if menu_item(ui, "Paste", "Ctrl+V") {
-                        if let Some(s) = clipboard_text() {
-                            self.pending_events.push(egui::Event::Paste(s));
-                        }
-                    }
-                    if menu_item(ui, "Delete", "Del") {
-                        self.pending_events.push(key_event(Key::Delete, Modifiers::NONE));
-                    }
-                    if menu_item(ui, "Select All", "Ctrl+A") {
-                        let n = self.docs[self.active].text.chars().count();
-                        self.set_cursor(ctx, 0, n);
-                    }
-                    ui.separator();
-                    if menu_item(ui, "Find…", "Ctrl+F") {
-                        self.find_open = true;
-                        self.show_replace = false;
-                        self.focus_find = true;
-                    }
-                    if menu_item(ui, "Replace…", "Ctrl+H") {
-                        self.find_open = true;
-                        self.show_replace = true;
-                        self.focus_find = true;
-                    }
-                    if menu_item(ui, "Find in Files…", "Ctrl+Shift+F") {
-                        self.open_fif();
-                    }
-                    if menu_item(ui, "Go To…", "Ctrl+G") {
-                        self.goto_open = true;
-                    }
-                    ui.separator();
-                    if menu_item(ui, "Insert Time/Date", "F5") {
-                        self.insert_time_date(ctx);
-                    }
-                    // Commands that plugins put in a menu. The "Format" and
-                    // "Plugins" menus of plugin API 3 both go here.
-                    let language = self.docs[self.active].language.clone();
-                    let scripts = &self.plugin_host.scripts;
-                    if scripts
-                        .iter()
-                        .flat_map(|s| &s.commands)
-                        .any(|c| plugins::MENUS.contains(&c.menu.as_str()))
-                    {
-                        ui.separator();
-                    }
-                    for menu in plugins::MENUS {
-                        if let Some(run) =
-                            plugin_command_items(ui, scripts, language.as_deref(), Some(menu))
-                        {
-                            self.pending_plugin_cmds.push(run);
-                            self.focus_editor = true;
-                        }
-                    }
-                });
-                ui.separator();
-                if menu_item(ui, "Settings", "Ctrl+,") {
-                    self.open_settings(None);
-                }
-            });
-            ui.menu_button("Help", |ui| {
-                if ui.button("About Notey").clicked() {
-                    self.about_open = true;
-                }
-            });
-        }
-    }
-
-    /// Custom Fluent title bar: app icon, Win11-style tabs, "+", a drag
-    /// region, and min/max/close caption buttons.
-    fn title_bar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let p = self.palette();
-        let bar = ui.max_rect();
-        let painter = ui.painter().clone();
-        let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-
-        // ---- caption buttons (fixed to the right edge) ----
-        const BTN_W: f32 = 46.0;
-        let caption_x0 = bar.right() - 3.0 * BTN_W;
-        let glyph_stroke = egui::Stroke::new(1.2, p.text);
-        for (k, idx) in ["min", "max", "close"].iter().zip(0..3) {
-            let rect = egui::Rect::from_min_size(
-                egui::pos2(caption_x0 + idx as f32 * BTN_W, bar.top()),
-                egui::vec2(BTN_W, bar.height()),
-            );
-            let resp = ui.interact(rect, egui::Id::new(("caption", *k)), egui::Sense::click());
-            let is_close = *k == "close";
-            if resp.hovered() {
-                let fill = if is_close { p.close_hover } else { p.control_hover };
-                painter.rect_filled(rect, 0.0, fill);
-            }
-            let g = if resp.hovered() && is_close {
-                egui::Stroke::new(1.2, Color32::WHITE)
-            } else {
-                glyph_stroke
-            };
-            let c = rect.center();
-            match *k {
-                "min" => {
-                    painter.line_segment(
-                        [c + egui::vec2(-5.0, 0.5), c + egui::vec2(5.0, 0.5)],
-                        g,
-                    );
-                }
-                "max" => {
-                    if maximized {
-                        // restore: two offset squares
-                        let r1 = egui::Rect::from_center_size(
-                            c + egui::vec2(-1.5, 1.5),
-                            egui::vec2(8.0, 8.0),
-                        );
-                        painter.rect_stroke(r1, 2.0, g, egui::StrokeKind::Middle);
-                        painter.line_segment(
-                            [c + egui::vec2(-1.5, -2.5), c + egui::vec2(2.5, -2.5)],
-                            g,
-                        );
-                        painter.line_segment(
-                            [c + egui::vec2(4.5, -2.5), c + egui::vec2(4.5, 1.5)],
-                            g,
-                        );
-                    } else {
-                        let r = egui::Rect::from_center_size(c, egui::vec2(9.0, 9.0));
-                        painter.rect_stroke(r, 2.0, g, egui::StrokeKind::Middle);
-                    }
-                }
-                _ => {
-                    painter.line_segment(
-                        [c + egui::vec2(-4.5, -4.5), c + egui::vec2(4.5, 4.5)],
-                        g,
-                    );
-                    painter.line_segment(
-                        [c + egui::vec2(-4.5, 4.5), c + egui::vec2(4.5, -4.5)],
-                        g,
-                    );
-                }
-            }
-            if resp.clicked() {
-                match *k {
-                    "min" => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
-                    "max" => {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized))
-                    }
-                    _ => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                }
-            }
-        }
-
-        // ---- app icon (doubles as the menu button when the bar is hidden) ----
-        let mut x = bar.left() + 8.0;
-        if let Some(tex) = self.icon_tex.clone() {
-            let hit_rect = egui::Rect::from_center_size(
-                egui::pos2(x + 14.0, bar.center().y),
-                egui::vec2(28.0, 28.0),
-            );
-            let icon_rect =
-                egui::Rect::from_center_size(hit_rect.center(), egui::vec2(16.0, 16.0));
-            if self.show_menu {
-                painter.image(
-                    tex.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            } else {
-                let resp =
-                    ui.interact(hit_rect, egui::Id::new("icon_menu"), egui::Sense::click());
-                if resp.hovered() {
-                    painter.rect_filled(hit_rect, 4.0, p.tab_hover);
-                }
-                painter.image(
-                    tex.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-                egui::Popup::menu(&resp)
-                    .anchor(egui::PopupAnchor::Position(egui::pos2(
-                        hit_rect.left(),
-                        hit_rect.bottom() + 4.0,
-                    )))
-                    .show(|ui| {
-                        ui.set_min_width(160.0);
-                        self.menus(ctx, ui);
-                    });
-            }
-            x += 30.0;
-        }
-
-        // ---- tabs (one entry for each document, then Settings) ----
-        let mut close_request: Option<TabRef> = None;
-        let mut activate: Option<TabRef> = None;
-        let mut drag_left = x;
-        if !self.tabs_left {
-            let plus_w = 30.0;
-            let tabs_avail = (caption_x0 - 60.0 - plus_w - x).max(60.0);
-            let entries = self.tab_entries();
-            let n = entries.len().max(1) as f32;
-            let tab_w = (tabs_avail / n).clamp(60.0, 200.0);
-            let tab_font = FontId::new(13.0, FontFamily::Proportional);
-            for entry in &entries {
-                let rect = egui::Rect::from_min_size(
-                    egui::pos2(x, bar.top() + 6.0),
-                    egui::vec2(tab_w - 4.0, bar.height() - 12.0),
-                );
-                x += tab_w;
-                let resp = ui.interact(rect, entry.id, egui::Sense::click());
-                if entry.active {
-                    painter.rect_filled(rect, 6.0, p.control_active);
-                    painter.rect_stroke(
-                        rect,
-                        6.0,
-                        egui::Stroke::new(1.0, p.stroke),
-                        egui::StrokeKind::Inside,
-                    );
-                } else if resp.hovered() {
-                    painter.rect_filled(rect, 6.0, p.tab_hover);
-                }
-
-                // close button (shown on active or hovered tabs, if wide enough)
-                let show_close = (entry.active || resp.hovered()) && tab_w > 80.0;
-                let close_rect = egui::Rect::from_center_size(
-                    egui::pos2(rect.right() - 14.0, rect.center().y),
-                    egui::vec2(18.0, 18.0),
-                );
-                let text_right = if show_close {
-                    close_rect.left() - 2.0
+            }))
+            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                if this.settings_active {
+                    this.close_settings(window, cx);
                 } else {
-                    rect.right() - 8.0
-                };
-
-                // title (truncated), with a gear in front of "Settings"
-                let text_color = if entry.active { p.text } else { p.text_weak };
-                let mut text_left = rect.left() + 10.0;
-                if entry.tab == TabRef::Settings {
-                    paint_gear(
-                        &painter,
-                        egui::pos2(text_left + 6.0, rect.center().y),
-                        6.0,
-                        text_color,
-                    );
-                    text_left += 18.0;
+                    this.request_close_tab(this.active, window, cx);
                 }
-                let mut job = egui::text::LayoutJob::simple_singleline(
-                    entry.label.clone(),
-                    tab_font.clone(),
-                    text_color,
-                );
-                job.wrap.max_width = (text_right - text_left).max(10.0);
-                job.wrap.max_rows = 1;
-                job.wrap.break_anywhere = true;
-                let galley = painter.layout_job(job);
-                painter.galley(
-                    egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
-                    galley,
-                    text_color,
-                );
-
-                if show_close {
-                    let close_resp =
-                        ui.interact(close_rect, entry.id.with("close"), egui::Sense::click());
-                    if close_resp.hovered() {
-                        painter.rect_filled(close_rect, 4.0, p.control_hover);
-                    }
-                    paint_cross(&painter, close_rect.center(), 3.5, text_color);
-                    if close_resp.clicked() {
-                        close_request = Some(entry.tab);
+            }))
+            .on_action(cx.listener(|this, _: &NextTab, window, cx| {
+                let n = this.tabs.len();
+                this.activate((this.active + 1) % n, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PrevTab, window, cx| {
+                let n = this.tabs.len();
+                this.activate((this.active + n - 1) % n, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.update_settings(|s| s.zoom = (s.zoom + 10.0).min(500.0), cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.update_settings(|s| s.zoom = (s.zoom - 10.0).max(10.0), cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.update_settings(|s| s.zoom = 100.0, cx)))
+            .on_action(cx.listener(|this, _: &InsertTimeDate, _, cx| {
+                let stamp = chrono::Local::now().format("%-I:%M %p %-m/%-d/%Y").to_string();
+                this.with_editor(cx, |view, cx| view.insert_text(&stamp, "input", cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
+            .on_action(cx.listener(|_, _: &Exit, window, _| window.remove_window()))
+            .on_action(cx.listener(|this, _: &Undo, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(undo, cx))))
+            .on_action(cx.listener(|this, _: &Redo, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(redo, cx))))
+            .on_action(cx.listener(|this, _: &Cut, _, cx| this.with_editor(cx, |v, cx| _ = v.copy(true, cx))))
+            .on_action(cx.listener(|this, _: &Copy, _, cx| this.with_editor(cx, |v, cx| _ = v.copy(false, cx))))
+            .on_action(cx.listener(|this, _: &Paste, _, cx| this.with_editor(cx, |v, cx| _ = v.paste_from_clipboard(cx))))
+            .on_action(cx.listener(|this, _: &Delete, _, cx| {
+                this.with_editor(cx, |v, cx| _ = v.run_state_command(codemirror_commands::delete_char_forward, cx))
+            }))
+            .on_action(cx.listener(|this, _: &SelectAll, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(select_all, cx))))
+            .on_action(cx.listener(|_, _: &About, window, cx| {
+                let detail = format!("Version {}\nA native notepad, rebuilt on GPUI and a Rust port of CodeMirror.", env!("CARGO_PKG_VERSION"));
+                drop(window.prompt(PromptLevel::Info, "Notey", Some(&detail), &["OK"], cx));
+            }))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                for path in paths.paths() {
+                    if path.is_file() {
+                        this.open_path(path, window, cx);
                     }
                 }
-                if resp.clicked() && close_request.is_none() {
-                    activate = Some(entry.tab);
-                }
-                if resp.middle_clicked() {
-                    close_request = Some(entry.tab);
-                }
-            }
-
-            // ---- "+" new tab ----
-            let plus_rect = egui::Rect::from_min_size(
-                egui::pos2(x + 2.0, bar.top() + 8.0),
-                egui::vec2(26.0, bar.height() - 16.0),
-            );
-            let plus_resp =
-                ui.interact(plus_rect, egui::Id::new("tab_plus"), egui::Sense::click());
-            if plus_resp.hovered() {
-                painter.rect_filled(plus_rect, 4.0, p.tab_hover);
-            }
-            paint_plus(&painter, plus_rect.center(), 4.5, p.text);
-            if plus_resp.clicked() {
-                self.new_tab();
-            }
-            plus_resp.on_hover_text("New tab (Ctrl+N)");
-            drag_left = plus_rect.right();
-        } else {
-            // the tabs are in the left panel: show the title of the visible tab
-            let title = self
-                .tab_entries()
-                .into_iter()
-                .find(|e| e.active)
-                .map(|e| e.label)
-                .unwrap_or_default();
-            painter.text(
-                egui::pos2(x + 4.0, bar.center().y),
-                egui::Align2::LEFT_CENTER,
-                title,
-                FontId::new(13.0, FontFamily::Proportional),
-                p.text_weak,
-            );
-        }
-
-        // ---- drag region (everything between "+" and caption buttons) ----
-        let drag_rect = egui::Rect::from_min_max(
-            egui::pos2(drag_left + 2.0, bar.top()),
-            egui::pos2(caption_x0, bar.bottom()),
-        );
-        let drag_resp = ui.interact(
-            drag_rect,
-            egui::Id::new("titlebar_drag"),
-            egui::Sense::click_and_drag(),
-        );
-        if drag_resp.double_clicked() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-        } else if drag_resp.is_pointer_button_down_on()
-            && ctx.input(|input| input.pointer.primary_pressed())
-        {
-            // Hand the press to the OS immediately. `drag_started()` waits
-            // for egui's movement threshold, which leaves the window behind
-            // the pointer by that initial dead-zone distance.
-            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
-
-        self.apply_tab_clicks(activate, close_request);
-    }
-
-    /// The entries of the tab strip: the documents, then Settings if it is open.
-    fn tab_entries(&self) -> Vec<TabEntry> {
-        let mut out: Vec<TabEntry> = self
-            .docs
-            .iter()
-            .enumerate()
-            .map(|(i, doc)| TabEntry {
-                tab: TabRef::Doc(i),
-                id: egui::Id::new(("tab", doc.id)),
-                label: if doc.modified() {
-                    format!("• {}", doc.title())
-                } else {
-                    doc.title()
-                },
-                active: i == self.active && !self.settings_active,
-            })
-            .collect();
-        if self.settings_open {
-            out.push(TabEntry {
-                tab: TabRef::Settings,
-                id: egui::Id::new("tab_settings"),
-                label: "Settings".to_string(),
-                active: self.settings_active,
-            });
-        }
-        out
-    }
-
-    fn apply_tab_clicks(&mut self, activate: Option<TabRef>, close: Option<TabRef>) {
-        match activate {
-            Some(TabRef::Doc(i)) => self.activate_doc(i),
-            Some(TabRef::Settings) => self.settings_active = true,
-            None => {}
-        }
-        match close {
-            Some(TabRef::Doc(i)) => self.request_close_tab(i),
-            Some(TabRef::Settings) => self.close_settings(),
-            None => {}
-        }
-    }
-
-    /// The tabs as a vertical list on the left, with the gear at the bottom.
-    fn left_tab_panel(&mut self, root: &mut egui::Ui) {
-        let p = self.palette();
-        egui::Panel::left(egui::Id::new("tab_list"))
-            .resizable(true)
-            .default_size(200.0)
-            .min_size(120.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(p.chrome)
-                    .inner_margin(egui::Margin::symmetric(6, 6)),
-            )
-            .show(root, |ui| {
-                let mut activate: Option<TabRef> = None;
-                let mut close: Option<TabRef> = None;
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("OPEN TABS").small().color(p.text_weak));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (rect, resp) =
-                            ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
-                        if resp.hovered() {
-                            ui.painter().rect_filled(rect, 4.0, p.tab_hover);
-                        }
-                        paint_plus(ui.painter(), rect.center(), 4.5, p.text);
-                        if resp.on_hover_text("New tab (Ctrl+N)").clicked() {
-                            self.new_tab();
-                        }
-                    });
-                });
-                ui.add_space(2.0);
-                // the gear row stays at the bottom; the list scrolls above it
-                let list_h = (ui.available_height() - 36.0).max(40.0);
-                egui::ScrollArea::vertical()
-                    .max_height(list_h)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for entry in self.tab_entries() {
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), 26.0),
-                                egui::Sense::hover(),
-                            );
-                            let resp = ui.interact(rect, entry.id, egui::Sense::click());
-                            let painter = ui.painter();
-                            if entry.active {
-                                painter.rect_filled(rect, 4.0, p.control_active);
-                            } else if resp.hovered() {
-                                painter.rect_filled(rect, 4.0, p.tab_hover);
-                            }
-                            let color = if entry.active { p.text } else { p.text_weak };
-                            let mut text_left = rect.left() + 8.0;
-                            if entry.tab == TabRef::Settings {
-                                paint_gear(
-                                    painter,
-                                    egui::pos2(text_left + 6.0, rect.center().y),
-                                    6.0,
-                                    color,
-                                );
-                                text_left += 18.0;
-                            }
-                            let close_rect = egui::Rect::from_center_size(
-                                egui::pos2(rect.right() - 12.0, rect.center().y),
-                                egui::vec2(18.0, 18.0),
-                            );
-                            let show_close = entry.active || resp.hovered();
-                            let mut job = egui::text::LayoutJob::simple_singleline(
-                                entry.label.clone(),
-                                FontId::new(13.0, FontFamily::Proportional),
-                                color,
-                            );
-                            job.wrap.max_width = (close_rect.left() - 2.0 - text_left).max(10.0);
-                            job.wrap.max_rows = 1;
-                            job.wrap.break_anywhere = true;
-                            let galley = painter.layout_job(job);
-                            painter.galley(
-                                egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
-                                galley,
-                                color,
-                            );
-                            let mut closed = false;
-                            if show_close {
-                                let close_resp = ui.interact(
-                                    close_rect,
-                                    entry.id.with("close"),
-                                    egui::Sense::click(),
-                                );
-                                if close_resp.hovered() {
-                                    ui.painter().rect_filled(close_rect, 4.0, p.control_hover);
-                                }
-                                paint_cross(ui.painter(), close_rect.center(), 3.5, color);
-                                if close_resp.clicked() {
-                                    close = Some(entry.tab);
-                                    closed = true;
-                                }
-                            }
-                            if resp.clicked() && !closed {
-                                activate = Some(entry.tab);
-                            }
-                            if resp.middle_clicked() {
-                                close = Some(entry.tab);
-                            }
-                        }
-                    });
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                    self.gear_button(ui);
-                });
-                self.apply_tab_clicks(activate, close);
-            });
-    }
-
-    /// The gear icon that opens the Settings tab.
-    fn gear_button(&mut self, ui: &mut egui::Ui) {
-        let p = self.palette();
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 22.0), egui::Sense::click());
-        if resp.hovered() {
-            ui.painter().rect_filled(rect, 4.0, p.tab_hover);
-        }
-        let color = if self.settings_active { p.text } else { p.text_weak };
-        paint_gear(ui.painter(), rect.center(), 7.0, color);
-        if resp.on_hover_text("Settings (Ctrl+,)").clicked() {
-            self.open_settings(None);
-        }
-    }
-
-    /// Edge-resize support for the frameless window.
-    fn handle_resize_edges(&self, ctx: &egui::Context) {
-        use egui::{CursorIcon, ViewportCommand};
-        use egui::viewport::ResizeDirection;
-        if ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
-            return;
-        }
-        let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {
-            return;
-        };
-        let r = ctx.content_rect();
-        const B: f32 = 5.0;
-        let left = pos.x - r.left() < B;
-        let right = r.right() - pos.x < B;
-        let top = pos.y - r.top() < B;
-        let bottom = r.bottom() - pos.y < B;
-        let dir = match (left, right, top, bottom) {
-            (true, _, true, _) => Some(ResizeDirection::NorthWest),
-            (_, true, true, _) => Some(ResizeDirection::NorthEast),
-            (true, _, _, true) => Some(ResizeDirection::SouthWest),
-            (_, true, _, true) => Some(ResizeDirection::SouthEast),
-            (true, ..) => Some(ResizeDirection::West),
-            (_, true, ..) => Some(ResizeDirection::East),
-            (_, _, true, _) => Some(ResizeDirection::North),
-            (_, _, _, true) => Some(ResizeDirection::South),
-            _ => None,
-        };
-        let Some(dir) = dir else { return };
-        let icon = match dir {
-            ResizeDirection::North | ResizeDirection::South => CursorIcon::ResizeVertical,
-            ResizeDirection::East | ResizeDirection::West => CursorIcon::ResizeHorizontal,
-            ResizeDirection::NorthEast | ResizeDirection::SouthWest => CursorIcon::ResizeNeSw,
-            ResizeDirection::NorthWest | ResizeDirection::SouthEast => CursorIcon::ResizeNwSe,
-        };
-        ctx.output_mut(|o| o.cursor_icon = icon);
-        if ctx.input(|i| i.pointer.primary_pressed()) {
-            ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
-        }
-    }
-
-    fn editor(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        self.keep_editor_focus(ctx);
-        // rendered Markdown view (toggled by the bundled Markdown Preview
-        // plugin) replaces whichever editor is active for this tab
-        let active_id = self.docs[self.active].id;
-        if self.md_rendered.contains(&active_id) {
-            if self.docs[self.active].language.as_deref() == Some("Markdown") {
-                self.markdown_view(ui);
-                return;
-            }
-            // language changed away from Markdown: fall back to the editor
-            self.md_rendered.remove(&active_id);
-        }
-        if self.md_split.contains(&active_id) {
-            let text = self.docs[self.active].text.clone();
-            let fill = self.palette().editor;
-            egui::Panel::right(egui::Id::new(("md_split", active_id)))
-                .resizable(true)
-                .default_size(ui.available_width() * 0.5)
-                .min_size(160.0)
-                .frame(egui::Frame::new().fill(fill).inner_margin(egui::Margin {
-                    left: 14,
-                    right: 8,
-                    top: 4,
-                    bottom: 4,
-                }))
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt(("md_split_scroll", active_id))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &text);
-                        });
-                });
-        }
-        if self.preview_editor {
-            self.preview_editor_ui(ctx, ui);
-            return;
-        }
-        let font = FontId::new(self.font_size * self.zoom / 100.0, editor_family());
-        let line_height = if (self.line_height - 1.0).abs() < 0.01 {
-            None
-        } else {
-            let base = ui.fonts_mut(|f| f.row_height(&font));
-            Some(base * self.line_height)
-        };
-        let text_color = ui.visuals().text_color();
-        let gutter_bg = self.palette().chrome;
-        let spell_on = self.spell_enabled
-            && self.spell.available()
-            && self.docs[self.active].text.len() < 512 * 1024;
-        let word_wrap = self.word_wrap;
-        let ligatures = self.ligatures;
-        let tab_size = self.tab_cols();
-        let editor_id = self.editor_id();
-        let doc_id = self.docs[self.active].id;
-        let language = self.docs[self.active].language.clone();
-        {
-            let state = self.editor_states.entry(doc_id).or_default();
-            match (&language, &state.hl) {
-                (None, Some(_)) => state.hl = None,
-                (Some(language), hl)
-                    if hl
-                        .as_ref()
-                        .map(|cache| &cache.syntax != language)
-                        .unwrap_or(true) =>
-                {
-                    state.hl = Some(crate::syntax::HlCache::new(language.clone()));
-                }
-                _ => {}
-            }
-        }
-        // egui's TextEdit treats any pointer press as the start of a text
-        // selection, including the secondary button. Keep the existing range
-        // so opening our context menu does not collapse it before Cut/Copy.
-        let selection_before_context_menu = ctx
-            .input(|i| i.pointer.secondary_pressed())
-            .then(|| {
-                egui::text_edit::TextEditState::load(ctx, editor_id)
-                    .and_then(|state| state.cursor.char_range())
-            })
-            .flatten();
-
-        let dark = self.dark;
-        let imported_syntax_theme = self
-            .custom_theme
-            .as_ref()
-            .map(|theme| Arc::clone(&theme.syntax));
-        let spell = &self.spell;
-        let mut highlight = self
-            .editor_states
-            .get_mut(&doc_id)
-            .and_then(|state| state.hl.as_mut());
-        let styles = self.text_styles.entry(doc_id).or_default();
-        let mut layouter = move |ui: &egui::Ui,
-                                 buf: &dyn egui::TextBuffer,
-                                 wrap_width: f32|
-              -> Arc<egui::Galley> {
-            let text = buf.as_str();
-            // the layouter sees each edit first: move the text styles here
-            styles.sync(text);
-            let runs = styles.byte_runs(text, 0, usize::MAX);
-            let mut job = LayoutJob::default();
-            job.wrap.max_width = if word_wrap { wrap_width } else { f32::INFINITY };
-            let normal = TextFormat {
-                font_id: font.clone(),
-                color: text_color,
-                line_height,
-                ..Default::default()
-            };
-            if let Some(cache) = highlight.as_deref_mut() {
-                cache.sync_source(text);
-                let lines: Vec<&str> = text.split('\n').collect();
-                cache.ensure(
-                    lines.len(),
-                    lines.len(),
-                    dark,
-                    imported_syntax_theme.as_deref(),
-                    |i| {
-                        let mut line = String::with_capacity(lines[i].len() + 1);
-                        line.push_str(lines[i]);
-                        line.push('\n');
-                        line
-                    },
-                );
-                let active_spell = spell_on.then_some(spell);
-                for (i, line) in lines.iter().enumerate() {
-                    let spans = cache
-                        .spans
-                        .get(i)
-                        .and_then(|spans| spans.as_deref())
-                        .unwrap_or(&[]);
-                    editor::append_highlighted_line(
-                        &mut job,
-                        line,
-                        spans,
-                        active_spell,
-                        &normal,
-                        Color32::from_rgb(232, 82, 82),
-                    );
-                    if i + 1 < lines.len() {
-                        job.append("\n", 0.0, normal.clone());
-                    }
-                }
-                if !ligatures {
-                    editor::break_ligatures(&mut job);
-                }
-                editor::apply_tab_stops(&mut job, tab_size);
-                crate::styles::apply_to_job(&mut job, &runs);
-                return ui.fonts_mut(|f| f.layout_job(job));
-            }
-            if !spell_on {
-                job.append(text, 0.0, normal);
-            } else {
-                let bad = TextFormat {
-                    underline: egui::Stroke::new(1.5, Color32::from_rgb(232, 82, 82)),
-                    ..normal.clone()
-                };
-                append_spellchecked(&mut job, text, spell, &normal, &bad);
-            }
-            if !ligatures {
-                editor::break_ligatures(&mut job);
-            }
-            editor::apply_tab_stops(&mut job, tab_size);
-            crate::styles::apply_to_job(&mut job, &runs);
-            ui.fonts_mut(|f| f.layout_job(job))
-        };
-
-        let gutter_font = FontId::new(self.font_size * self.zoom / 100.0, editor_family());
-        let show_ln = self.show_line_numbers;
-        let doc = &mut self.docs[self.active];
-        let line_count = doc.text.split('\n').count().max(1);
-        let output = ui
-            .horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let gutter = if show_ln {
-                    let digits = line_count.to_string().len().max(2);
-                    let char_w = ui.fonts_mut(|f| f.glyph_width(&gutter_font, '0'));
-                    let w = char_w * digits as f32 + 14.0;
-                    let left = ui.cursor().min.x;
-                    ui.add_space(w);
-                    Some((left, w))
-                } else {
-                    None
-                };
-                let output = egui::ScrollArea::both()
-                    .id_salt(("editor_scroll", doc.id))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let output = egui::TextEdit::multiline(&mut doc.text)
-                            .id(editor_id)
-                            .frame(egui::Frame::NONE)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(30)
-                            .lock_focus(true) // Tab inserts a tab character
-                            .layouter(&mut layouter)
-                            .show(ui);
-                        if output.response.dragged_by(egui::PointerButton::Primary) {
-                            editor::scroll_while_selecting(ui, word_wrap);
-                        }
-                        output
-                    })
-                    .inner;
-                if let Some((gutter_left, gutter_w)) = gutter {
-                    let painter = ui.painter();
-                    let clip = ui.clip_rect();
-                    painter.rect_filled(
-                        egui::Rect::from_min_max(
-                            egui::pos2(gutter_left, clip.top()),
-                            egui::pos2(gutter_left + gutter_w, clip.bottom()),
-                        ),
-                        0.0,
-                        gutter_bg,
-                    );
-                    let color = ui.visuals().weak_text_color();
-                    let x_right = gutter_left + gutter_w - 8.0;
-                    let mut line_no = 1usize;
-                    let mut starts_line = true;
-                    for row in &output.galley.rows {
-                        if starts_line {
-                            let y = output.galley_pos.y + row.pos.y;
-                            let h = row.row.size.y;
-                            if y <= clip.bottom() && y + h >= clip.top() {
-                                painter.text(
-                                    egui::pos2(x_right, y),
-                                    egui::Align2::RIGHT_TOP,
-                                    line_no.to_string(),
-                                    gutter_font.clone(),
-                                    color,
-                                );
-                            } else if y > clip.bottom() {
-                                break;
-                            }
-                            line_no += 1;
-                        } else if row.pos.y + output.galley_pos.y > clip.bottom() {
-                            break;
-                        }
-                        starts_line = row.ends_with_newline;
-                    }
-                }
-                output
-            })
-            .inner;
-
-        if output.response.changed() {
-            self.text_changed_pending = true;
-        }
-        if let Some(range) = selection_before_context_menu {
-            let mut state =
-                egui::text_edit::TextEditState::load(ctx, editor_id).unwrap_or_default();
-            state.cursor.set_char_range(Some(range));
-            state.store(ctx, editor_id);
-        }
-
-        if self.focus_editor {
-            output.response.request_focus();
-            self.focus_editor = false;
-        }
-
-        // capture the word under a right-click for the context menu
-        if output.response.secondary_clicked() {
-            self.ctx_word = None;
-            if let Some(pos) = output.response.interact_pointer_pos() {
-                let rel = pos - output.galley_pos;
-                let ccursor = output.galley.cursor_from_pos(rel);
-                let idx = usize::from(ccursor.index);
-                let text = &self.docs[self.active].text;
-                if let Some((a, b, word)) = word_at(text, idx) {
-                    if spell::checkable(&word, prev_char(text, a)) && !self.spell.check(&word) {
-                        self.ctx_suggestions = self.spell.suggest(&word);
-                        self.ctx_word = Some((a, b, word));
-                    }
-                }
-            }
-        }
-
-        let mut replace_with: Option<(usize, usize, String)> = None;
-        let mut add_word: Option<String> = None;
-        let ctx_word = self.ctx_word.clone();
-        let suggestions = self.ctx_suggestions.clone();
-        output.response.context_menu(|ui| {
-            ui.set_min_width(180.0);
-            if let Some((a, b, word)) = &ctx_word {
-                ui.label(
-                    egui::RichText::new(format!("\"{word}\" not in dictionary"))
-                        .italics()
-                        .weak(),
-                );
-                if suggestions.is_empty() {
-                    ui.label("(no suggestions)");
-                } else {
-                    for s in &suggestions {
-                        if ui.button(s).clicked() {
-                            replace_with = Some((*a, *b, s.clone()));
-                            ui.close();
-                        }
-                    }
-                }
-                if ui.button("Add to dictionary").clicked() {
-                    add_word = Some(word.clone());
-                    ui.close();
-                }
-                ui.separator();
-            }
-            if ui.button("Cut").clicked() {
-                self.pending_events.push(egui::Event::Cut);
-                ui.close();
-            }
-            if ui.button("Copy").clicked() {
-                self.pending_events.push(egui::Event::Copy);
-                ui.close();
-            }
-            if ui.button("Paste").clicked() {
-                if let Some(s) = clipboard_text() {
-                    self.pending_events.push(egui::Event::Paste(s));
-                }
-                ui.close();
-            }
-            if ui.button("Select All").clicked() {
-                let n = self.docs[self.active].text.chars().count();
-                self.set_cursor(ui.ctx(), 0, n);
-                ui.close();
-            }
-            let language = self.docs[self.active].language.clone();
-            if let Some(run) = context_plugin_items(ui, &self.plugin_host.scripts, language.as_deref()) {
-                self.pending_plugin_cmds.push(run);
-            }
-        });
-
-        if let Some((a, b, s)) = replace_with {
-            self.edit_text(ctx, (a, b), &s);
-            self.ctx_word = None;
-        }
-        if let Some(w) = add_word {
-            self.spell.add_word(&w);
-            self.ctx_word = None;
-        }
-    }
-
-    fn markdown_view(&mut self, ui: &mut egui::Ui) {
-        // the editor isn't drawn this frame; don't leave focus on a widget
-        // that no longer exists (accessibility clients reject that)
-        let editor_id = self.editor_id();
-        ui.memory_mut(|m| m.surrender_focus(editor_id));
-        let mut back_to_editor = false;
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Rendered Markdown")
-                    .italics()
-                    .weak()
-                    .size(12.0),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .small_button("Edit")
-                    .on_hover_text("Back to the raw editor (Ctrl+Shift+M)")
-                    .clicked()
-                {
-                    back_to_editor = true;
-                }
-            });
-        });
-        ui.separator();
-        let doc = &self.docs[self.active];
-        let doc_id = doc.id;
-        let text = doc.text.clone();
-        egui::ScrollArea::vertical()
-            .id_salt(("md_render", doc_id))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &text);
-            });
-        if back_to_editor {
-            self.toggle_markdown_preview();
-        }
-    }
-
-    /// The tab size as a whole number of columns.
-    fn tab_cols(&self) -> usize {
-        (self.tab_size.round() as usize).clamp(1, editor::MAX_TAB_SIZE)
-    }
-
-    /// Give the keyboard focus to the editor when the window becomes active,
-    /// and when no other widget has the focus. The caret is then visible and
-    /// the user can type at once, without a click in the text.
-    fn keep_editor_focus(&mut self, ctx: &egui::Context) {
-        let window_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
-        let gained = window_focused && !self.window_focused;
-        self.window_focused = window_focused;
-        if !window_focused || self.close_confirm.is_some() || self.reload_confirm.is_some() {
-            return;
-        }
-        let nothing_focused = ctx.memory(|m| m.focused().is_none());
-        let popup_open = egui::Popup::is_any_open(ctx);
-        let pointer_down = ctx.input(|i| i.pointer.any_down());
-        if gained || (nothing_focused && !popup_open && !pointer_down) {
-            self.focus_editor = true;
-        }
-    }
-
-    fn preview_editor_ui(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let font = FontId::new(self.font_size * self.zoom / 100.0, editor_family());
-        let base_row = ui.fonts_mut(|f| f.row_height(&font));
-        let row_h = base_row * self.line_height.max(0.5);
-        let p = self.palette();
-        let mut th = editor::theme_from_palette(&p, font, row_h, self.dark);
-        th.ligatures = self.ligatures;
-        th.tab_size = self.tab_cols();
-        let spell_on = self.spell_enabled
-            && self.spell.available()
-            && self.docs[self.active].text.len() < 4 * 1024 * 1024;
-        let editor_id = egui::Id::new(("editor", self.docs[self.active].id));
-        let request_focus = self.focus_editor;
-        self.focus_editor = false;
-        let imported_syntax_theme = self
-            .custom_theme
-            .as_ref()
-            .map(|theme| Arc::clone(&theme.syntax));
-
-        // keep the highlight cache in step with the document's language
-        {
-            let lang = self.docs[self.active].language.clone();
-            let id = self.docs[self.active].id;
-            let state = self.editor_states.entry(id).or_default();
-            match (&lang, &state.hl) {
-                (None, Some(_)) => state.hl = None,
-                (Some(l), hl) if hl.as_ref().map(|h| &h.syntax != l).unwrap_or(true) => {
-                    state.hl = Some(crate::syntax::HlCache::new(l.clone()));
-                }
-                _ => {}
-            }
-        }
-
-        let marks_doc = self.marks_doc;
-        let doc = &mut self.docs[self.active];
-        let state = self.editor_states.entry(doc.id).or_default();
-        let styles = self.text_styles.entry(doc.id).or_default();
-        let scripts = &self.plugin_host.scripts;
-        let language = doc.language.clone();
-        let mut context_run: Option<(usize, String)> = None;
-        let mut extra_menu = |ui: &mut egui::Ui| {
-            if let Some(run) = context_plugin_items(ui, scripts, language.as_deref()) {
-                context_run = Some(run);
-            }
-        };
-        let spell = if spell_on { Some(&self.spell) } else { None };
-        let marks: &[(usize, usize)] = if marks_doc == doc.id {
-            &self.search_marks
-        } else {
-            &[]
-        };
-        let result = editor::show(
-            ui,
-            editor_id,
-            &mut doc.text,
-            doc.revision,
-            state,
-            &th,
-            self.show_line_numbers,
-            self.word_wrap,
-            spell,
-            marks,
-            request_focus,
-            imported_syntax_theme.as_deref(),
-            styles,
-            &mut extra_menu,
-        );
-        if let Some(run) = context_run {
-            self.pending_plugin_cmds.push(run);
-        }
-        if result.changed {
-            // char offsets are stale after edits
-            self.search_marks.clear();
-            self.text_changed_pending = true;
-        }
-        if let Some(word) = result.add_word {
-            self.spell.add_word(&word);
-        }
-        let _ = ctx;
-    }
-
-    /// Replace a char range in the active document, routing through the
-    /// preview editor's undo stack when it is active.
-    fn edit_text(&mut self, ctx: &egui::Context, range: (usize, usize), s: &str) {
-        self.text_changed_pending = true;
-        if self.preview_editor {
-            let now = ctx.input(|i| i.time);
-            let doc = &mut self.docs[self.active];
-            let state = self.editor_states.entry(doc.id).or_default();
-            state.apply_edit(&mut doc.text, range, s, now);
-            self.focus_editor = true;
-            return;
-        }
-        let text = &mut self.docs[self.active].text;
-        let sb = char_to_byte(text, range.0.min(range.1));
-        let eb = char_to_byte(text, range.0.max(range.1));
-        text.replace_range(sb..eb, s);
-        self.touch_active();
-        let after = range.0.min(range.1) + s.chars().count();
-        self.set_cursor(ctx, after, after);
-    }
-
-    /// Bump the active document's revision after a text mutation that
-    /// bypassed the preview editor (find/replace, plugins, suggestions).
-    fn touch_active(&mut self) {
-        let doc = &mut self.docs[self.active];
-        doc.touch();
-        if let Some(state) = self.editor_states.get_mut(&doc.id) {
-            state.note_external_change();
-        }
-    }
-
-    /// Turn typing, text changes and selection changes into (throttled)
-    /// plugin events. Runs at the start of the frame, after last frame's
-    /// edits have landed.
-    fn queue_change_events(&mut self, ctx: &egui::Context) {
-        if !self.pending_input.is_empty() {
-            let text = std::mem::take(&mut self.pending_input);
-            self.queued_plugin_events.push(("input".to_string(), Some(text)));
-        }
-        let focused = ctx.memory(|m| m.has_focus(self.editor_id()));
-        let typed: String = ctx.input(|i| {
-            i.events
-                .iter()
-                .filter_map(|e| match e {
-                    egui::Event::Text(t) => Some(t.as_str()),
-                    _ => None,
-                })
-                .collect()
-        });
-        if focused && !typed.is_empty() {
-            self.pending_input.push_str(&typed);
-        }
-        let now = ctx.input(|i| i.time);
-        let doc_id = self.docs[self.active].id;
-        let sel = self.cursor_range(ctx).unwrap_or((0, 0));
-        let fire_throttled = now - self.last_text_event > 0.25;
-        if self.text_changed_pending && fire_throttled {
-            self.text_changed_pending = false;
-            self.last_text_event = now;
-            self.queued_plugin_events.push(("text_changed".to_string(), None));
-        }
-        if self.last_selection != Some((doc_id, sel)) {
-            let first = self.last_selection.is_none();
-            self.last_selection = Some((doc_id, sel));
-            if !first {
-                self.queued_plugin_events.push(("selection_changed".to_string(), None));
-            }
-        }
-        if self.text_changed_pending {
-            ctx.request_repaint_after(std::time::Duration::from_millis(260));
-        }
-    }
-
-    /// Apply finished background plugin work: new dictionaries, a new
-    /// grammar set, changed feature scripts.
-    fn poll_plugins(&mut self, ctx: &egui::Context) {
-        let poll = self.pm.poll();
-        if let Some((dicts, _)) = poll.spell {
-            self.spell = Spell::with_dictionaries(dicts, self.pm.user_dictionary_path());
-        }
-        if poll.syntaxes_installed {
-            // files opened before their file type was available
-            for doc in &mut self.docs {
-                if doc.language.is_none() {
-                    if let Some(path) = &doc.path {
-                        doc.language = crate::syntax::detect(path);
-                    }
-                }
-            }
-        }
-        if poll.features_changed {
-            self.plugin_host = PluginHost::load(&self.pm.feature_scripts());
-            self.surface_plugin_errors();
-        }
-        if let Some(msg) = poll.messages.last() {
-            self.flash(msg.clone());
-        }
-        if self.pm.is_busy() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
-    }
-
-    fn status_bar(&mut self, ui: &mut egui::Ui) {
-        let status_items = self.status_items.clone();
-        let doc = &self.docs[self.active];
-        let install_hint = match (&doc.path, &doc.language) {
-            (Some(path), None) => self
-                .pm
-                .suggestion_for(path)
-                .map(|m| (m.id.clone(), m.name.clone())),
-            _ => None,
-        };
-        let (line, col) = self
-            .cursor_range(ui.ctx())
-            .map(|(_, end)| line_col(&doc.text, end))
-            .unwrap_or((1, 1));
-        let chars = doc.text.chars().count();
-        let cur_enc = doc.encoding;
-        let cur_le = doc.line_ending;
-        let cur_lang = doc.language.clone();
-        let zoom = self.zoom;
-        ui.horizontal(|ui| {
-            // with the tabs on the left, the gear is at the bottom of the tab list
-            if !self.tabs_left {
-                self.gear_button(ui);
-                ui.separator();
-            }
-            if let Some((msg, _)) = &self.status_msg {
-                ui.label(msg.clone());
-            } else {
-                ui.label(format!("Ln {line}, Col {col}"));
-                if let Some(hint) = install_hint.clone() {
-                    let (id, name) = hint;
-                    if ui
-                        .small_button(format!("Install {name} highlighting"))
-                        .on_hover_text("Install the file type plugin for this file")
-                        .clicked()
-                    {
-                        self.pm.install(&id);
-                    }
-                }
-            }
-            let mut new_enc: Option<Encoding> = None;
-            let mut new_le: Option<LineEnding> = None;
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(cur_enc.label(), |ui| {
-                    for enc in [
-                        Encoding::Utf8,
-                        Encoding::Utf8Bom,
-                        Encoding::Utf16Le,
-                        Encoding::Utf16Be,
-                        Encoding::Ansi,
-                    ] {
-                        if ui.radio(cur_enc == enc, enc.label()).clicked() {
-                            new_enc = Some(enc);
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text("Encoding used when saving");
-                ui.separator();
-                ui.menu_button(cur_le.label(), |ui| {
-                    for le in [LineEnding::Crlf, LineEnding::Lf] {
-                        if ui.radio(cur_le == le, le.label()).clicked() {
-                            new_le = Some(le);
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text("Line endings used when saving");
-                ui.separator();
-                let lang_label = cur_lang.clone().unwrap_or_else(|| "Plain Text".into());
-                ui.menu_button(lang_label, |ui| {
-                    self.language_picker_contents(ui);
-                })
-                .response
-                .on_hover_text("Syntax highlighting language");
-                ui.separator();
-                ui.label(format!("{zoom:.0}%"));
-                ui.separator();
-                ui.label(format!("{chars} characters"));
-                for (_, text, tooltip) in status_items.iter().rev() {
-                    ui.separator();
-                    let r = ui.label(text.as_str());
-                    if !tooltip.is_empty() {
-                        r.on_hover_text(tooltip.as_str());
-                    }
-                }
-            });
-            if let Some(enc) = new_enc {
-                self.docs[self.active].encoding = enc;
-            }
-            if let Some(le) = new_le {
-                self.docs[self.active].line_ending = le;
-            }
-        });
-    }
-
-    fn language_picker_contents(&mut self, ui: &mut egui::Ui) {
-        ui.set_min_width(220.0);
-        ui.add(
-            egui::TextEdit::singleline(&mut self.lang_filter).hint_text("Filter languages…"),
-        );
-        ui.separator();
-        let current = self.docs[self.active].language.clone();
-        let filter = self.lang_filter.to_lowercase();
-        let mut selected: Option<Option<String>> = None;
-        egui::ScrollArea::vertical()
-            .max_height(320.0)
-            .show(ui, |ui| {
-                if (filter.is_empty() || "plain text".contains(&filter))
-                    && ui
-                        .selectable_label(current.is_none(), "Plain Text")
-                        .clicked()
-                {
-                    selected = Some(None);
-                    ui.close();
-                }
-                for name in &crate::syntax::global().names {
-                    if !filter.is_empty() && !name.to_lowercase().contains(&filter) {
-                        continue;
-                    }
-                    if ui
-                        .selectable_label(current.as_deref() == Some(name), name)
-                        .clicked()
-                    {
-                        selected = Some(Some(name.clone()));
-                        ui.close();
-                    }
-                }
-            });
-        ui.separator();
-        if ui.button("More file types…").clicked() {
-            self.pm.open_at(crate::packages::Kind::Filetype);
-            ui.close();
-        }
-        if let Some(language) = selected {
-            self.docs[self.active].language = language;
-            self.lang_filter.clear();
-        }
-    }
-
-    fn find_window(&mut self, ctx: &egui::Context) {
-        if !self.find_open {
-            return;
-        }
-        let mut open = self.find_open;
-        let title = if self.show_replace { "Replace" } else { "Find" };
-        egui::Window::new(title)
-            .id(egui::Id::new("find_window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(ctx.content_rect().right_top() + egui::vec2(-320.0, 80.0))
-            .show(ctx, |ui| {
-                let mut do_next = false;
-                let mut do_prev = false;
-                egui::Grid::new("find_grid").num_columns(2).show(ui, |ui| {
-                    ui.label("Find what:");
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut self.find_text).desired_width(200.0),
-                    );
-                    if self.focus_find {
-                        resp.request_focus();
-                        self.focus_find = false;
-                    }
-                    if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        do_next = true;
-                        resp.request_focus();
-                    }
-                    ui.end_row();
-                    if self.show_replace {
-                        ui.label("Replace with:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.replace_text)
-                                .desired_width(200.0),
-                        );
-                        ui.end_row();
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.match_case, "Match case");
-                    ui.checkbox(&mut self.wrap_around, "Wrap around");
-                    if ui
-                        .checkbox(&mut self.use_regex, "Regex")
-                        .on_hover_text("Regular expression (supports lookaround and backreferences; $1 in Replace)")
-                        .changed()
-                    {
-                        self.regex_error = None;
-                    }
-                });
-                if let Some(err) = &self.regex_error {
-                    ui.colored_label(
-                        Color32::from_rgb(232, 82, 82),
-                        format!("Pattern error: {err}"),
-                    );
-                }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button("Find Next").clicked() {
-                        do_next = true;
-                    }
-                    if ui.button("Find Previous").clicked() {
-                        do_prev = true;
-                    }
-                    if self.show_replace {
-                        if ui.button("Replace").clicked() {
-                            self.replace_current(ctx);
-                        }
-                        if ui.button("Replace All").clicked() {
-                            self.replace_all(ctx);
-                        }
-                    } else if ui.small_button("Replace…").clicked() {
-                        self.show_replace = true;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Mark All").clicked() {
-                        self.mark_all(ctx);
-                    }
-                    if !self.search_marks.is_empty() {
-                        if ui.button("Clear Marks").clicked() {
-                            self.search_marks.clear();
-                        }
-                    }
-                });
-                if do_next {
-                    self.find_next(ctx, false);
-                }
-                if do_prev {
-                    self.find_next(ctx, true);
-                }
-            });
-        self.find_open = open;
-    }
-
-    fn goto_window(&mut self, ctx: &egui::Context) {
-        if !self.goto_open {
-            return;
-        }
-        let mut open = self.goto_open;
-        egui::Window::new("Go To Line")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Line number:");
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut self.goto_line).desired_width(80.0),
-                    );
-                    resp.request_focus();
-                    if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.goto_line(ctx);
-                    }
-                });
-                if ui.button("Go To").clicked() {
-                    self.goto_line(ctx);
-                }
-            });
-        self.goto_open = open && self.goto_open;
-    }
-
-    fn plugin_alert_windows(&mut self, ctx: &egui::Context) {
-        let mut close: Option<usize> = None;
-        for (i, (title, body)) in self.plugin_alerts.iter().enumerate() {
-            let mut open = true;
-            egui::Window::new(title.clone())
-                .id(egui::Id::new(("plugin_alert", i)))
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(body.clone());
-                    ui.add_space(6.0);
-                    if ui.button("OK").clicked() {
-                        close = Some(i);
-                    }
-                });
-            if !open {
-                close = Some(i);
-            }
-        }
-        if let Some(i) = close {
-            self.plugin_alerts.remove(i);
-        }
-    }
-
-    fn about_window(&mut self, ctx: &egui::Context) {
-        if !self.about_open {
-            return;
-        }
-        let mut open = self.about_open;
-        egui::Window::new("About Notey")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("Notey");
-                ui.label("A native Rust notepad with dark mode, tabs, and spellcheck.");
-                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                ui.add_space(6.0);
-                ui.label("Built with egui / eframe and spellbook (Hunspell).");
-            });
-        self.about_open = open;
-    }
-
-    fn reload_modal(&mut self, ctx: &egui::Context) {
-        let Some(id) = self.reload_confirm else { return };
-        let Some(idx) = self.docs.iter().position(|d| d.id == id) else {
-            self.reload_confirm = None;
-            return;
-        };
-        let title = self.docs[idx].title();
-        let modified = self.docs[idx].modified();
-        let mut action: Option<bool> = None; // Some(true) = reload
-        egui::Modal::new(egui::Id::new("reload_confirm")).show(ctx, |ui| {
-            ui.set_min_width(340.0);
-            ui.heading("File changed on disk");
-            ui.add_space(4.0);
-            ui.label(format!(
-                "\"{title}\" was modified by another program."
-            ));
-            if modified {
-                ui.colored_label(
-                    Color32::from_rgb(232, 82, 82),
-                    "Reloading will discard your unsaved changes in this tab.",
-                );
-            }
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui.button("Reload").clicked() {
-                    action = Some(true);
-                }
-                if ui.button("Keep This Version").clicked() {
-                    action = Some(false);
-                }
-            });
-        });
-        match action {
-            Some(true) => {
-                match self.docs[idx].reload() {
-                    Ok(()) => {
-                        let doc_id = self.docs[idx].id;
-                        if let Some(state) = self.editor_states.get_mut(&doc_id) {
-                            state.note_external_change();
-                        }
-                        self.flash(format!("Reloaded {title}"));
-                    }
-                    Err(e) => self.flash(format!("Reload failed: {e}")),
-                }
-                self.reload_confirm = None;
-            }
-            Some(false) => {
-                // refresh the known mtime so we don't re-prompt for this write
-                if let Some(path) = self.docs[idx].path.clone() {
-                    self.docs[idx].disk_mtime =
-                        std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-                }
-                self.reload_confirm = None;
-            }
-            None => {}
-        }
-    }
-
-    fn close_confirm_modal(&mut self, ctx: &egui::Context) {
-        let Some(pending) = &self.close_confirm else { return };
-        let is_app = matches!(pending, PendingClose::App);
-        let (title_text, body) = match pending {
-            PendingClose::Tab(i) => {
-                let t = self.docs.get(*i).map(|d| d.title()).unwrap_or_default();
-                (
-                    "Unsaved changes".to_string(),
-                    format!("Do you want to save changes to {t}?"),
-                )
-            }
-            PendingClose::App => {
-                let n = self.docs.iter().filter(|d| d.modified()).count();
-                (
-                    "Unsaved changes".to_string(),
-                    format!("You have unsaved changes in {n} tab(s). Save before exiting?"),
-                )
-            }
-        };
-        let mut action: Option<&str> = None;
-        egui::Modal::new(egui::Id::new("close_confirm")).show(ctx, |ui| {
-            ui.set_min_width(320.0);
-            ui.heading(title_text);
-            ui.add_space(4.0);
-            ui.label(body);
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                let save_label = if is_app { "Save All" } else { "Save" };
-                if ui.button(save_label).clicked() {
-                    action = Some("save");
-                }
-                if ui.button("Don't Save").clicked() {
-                    action = Some("discard");
-                }
-                if ui.button("Cancel").clicked() {
-                    action = Some("cancel");
-                }
-            });
-        });
-        match action {
-            Some("save") => match self.close_confirm.take() {
-                Some(PendingClose::Tab(i)) => {
-                    if self.save_doc(ctx, i) {
-                        self.close_tab(i);
-                    }
-                }
-                Some(PendingClose::App) => {
-                    let mut ok = true;
-                    for i in 0..self.docs.len() {
-                        if self.docs[i].modified() && !self.save_doc(ctx, i) {
-                            ok = false;
-                            break;
-                        }
-                    }
-                    if ok {
-                        self.allow_quit = true;
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                }
-                None => {}
-            },
-            Some("discard") => match self.close_confirm.take() {
-                Some(PendingClose::Tab(i)) => self.close_tab(i),
-                Some(PendingClose::App) => {
-                    self.allow_quit = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                None => {}
-            },
-            Some("cancel") => {
-                self.close_confirm = None;
-            }
-            _ => {}
-        }
+            }))
     }
 }
 
-impl eframe::App for NoteyApp {
-    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = &root.ctx().clone();
-        self.poll_theme_url_import(ctx);
-        // inject queued events (menu-driven undo/cut/copy/paste/…) so the
-        // focused TextEdit picks them up this frame
-        if !self.pending_events.is_empty() {
-            let events = std::mem::take(&mut self.pending_events);
-            self.focus_drawn_editor(ctx);
-            ctx.input_mut(|i| i.events.extend(events));
-        }
-
-        // window close (X button / Alt+F4 / File > Exit).
-        // The primary window keeps unsaved tabs in the session (restored on
-        // next launch), so it closes without prompting. Secondary windows
-        // have no session, so they still ask.
-        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_quit && !self.is_primary
-        {
-            if self.docs.iter().any(|d| d.modified()) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.close_confirm = Some(PendingClose::App);
+impl Render for NoteyApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = if self.settings_active {
+            "Settings - Notey".to_string()
+        } else {
+            match self.tabs.get(self.active) {
+                Some(tab) => format!("{}{} - Notey", if tab.modified { "*" } else { "" }, tab.doc.title()),
+                None => "Notey".to_string(),
             }
-        }
-
-        // files dragged onto the window
-        let dropped: Vec<PathBuf> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .filter_map(|f| f.path.clone())
-                .collect()
-        });
-        for path in dropped {
-            self.open_path(&path);
-        }
-
-        // files forwarded from other notey.exe launches ("open in existing window")
-        let forwarded: Vec<PathBuf> = {
-            let mut q = self.inbox.lock().unwrap();
-            std::mem::take(&mut *q)
         };
-        if !forwarded.is_empty() {
-            // the IPC listener already brought the window to the front
-            for path in &forwarded {
-                self.open_path(path);
-            }
-        }
-
-        if self.close_confirm.is_none() {
-            self.handle_plugin_keys(ctx);
-            self.handle_plugin_shortcuts(ctx);
-            self.handle_shortcuts(ctx);
-        }
-
-        // ---- plugin events & queued commands ----
-        if !self.ready_fired {
-            self.ready_fired = true;
-            self.last_active_doc = self.docs[self.active].id;
-            self.fire_event(ctx, "ready", None);
-        }
-        let cur_id = self.docs[self.active].id;
-        if cur_id != self.last_active_doc {
-            self.last_active_doc = cur_id;
-            let path = self.docs[self.active]
-                .path
-                .as_ref()
-                .map(|p| p.display().to_string());
-            self.fire_event(ctx, "buffer_activated", path);
-        }
-        self.poll_plugins(ctx);
-        self.queue_change_events(ctx);
-        let queued = std::mem::take(&mut self.queued_plugin_events);
-        for (kind, path) in queued {
-            self.fire_event(ctx, &kind, path);
-        }
-        let cmds = std::mem::take(&mut self.pending_plugin_cmds);
-        for (i, id) in cmds {
-            self.run_plugin_command(ctx, i, &id);
-        }
-
-        // ---- disk change detection + autosave ----
-        let now_t = ctx.input(|i| i.time);
-        if now_t - self.last_disk_check > 3.0 {
-            self.last_disk_check = now_t;
-            if self.reload_confirm.is_none() {
-                let mut deleted: Option<String> = None;
-                for doc in &mut self.docs {
-                    let Some(path) = doc.path.clone() else { continue };
-                    let Some(known) = doc.disk_mtime else { continue };
-                    match std::fs::metadata(&path).and_then(|m| m.modified()) {
-                        Ok(m) if m > known => {
-                            self.reload_confirm = Some(doc.id);
-                            break;
-                        }
-                        Ok(_) => {}
-                        Err(_) => {
-                            doc.disk_mtime = None;
-                            deleted = Some(doc.title());
-                        }
-                    }
-                }
-                if let Some(t) = deleted {
-                    self.flash(format!("File on disk was deleted: {t}"));
-                }
-            }
-        }
-        if self.autosave {
-            if now_t - self.last_autosave > self.autosave_secs.max(5.0) as f64 {
-                self.last_autosave = now_t;
-                let mut n = 0usize;
-                for doc in &mut self.docs {
-                    if doc.path.is_some() && doc.modified() && doc.save().is_ok() {
-                        n += 1;
-                    }
-                }
-                if n > 0 {
-                    self.flash(format!("Autosaved {n} file(s)"));
-                }
-            }
-        }
-        if self.autosave || self.docs.iter().any(|d| d.disk_mtime.is_some()) {
-            ctx.request_repaint_after(std::time::Duration::from_secs(3));
-        }
-
-        // drain incoming Find-in-Files results
-        if let Some(rx) = &self.fif_rx {
-            let mut disconnected = false;
-            loop {
-                match rx.try_recv() {
-                    Ok(m) => self.fif_results.push(m),
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        disconnected = true;
-                        break;
-                    }
-                }
-            }
-            if disconnected {
-                self.fif_rx = None;
-            } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            }
-        }
-
-        let p = self.palette();
-        egui::Panel::top(egui::Id::new("titlebar"))
-            .resizable(false)
-            .exact_size(40.0)
-            .frame(egui::Frame::new().fill(p.chrome))
-            .show(root, |ui| {
-                self.title_bar(ctx, ui);
-            });
-        if self.show_menu {
-            egui::Panel::top(egui::Id::new("menu"))
-                .resizable(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(p.chrome)
-                        .inner_margin(egui::Margin::symmetric(8, 2)),
-                )
-                .show(root, |ui| {
-                    self.menu_bar(ctx, ui);
-                });
-        }
-        // A request to show the plugin list opens the Plugins section.
-        if self.pm.open {
-            self.pm.open = false;
-            self.open_settings(Some(SettingsSection::Plugins));
-        }
-        if self.show_status {
-            egui::Panel::bottom(egui::Id::new("status"))
-                .resizable(false)
-                .frame(
-                    egui::Frame::new()
-                        .fill(p.chrome)
-                        .inner_margin(egui::Margin::symmetric(10, 4)),
-                )
-                .show(root, |ui| {
-                    self.status_bar(ui);
-                });
-        }
-        if self.tabs_left {
-            self.left_tab_panel(root);
-        }
-        self.fif_results_panel(root, ctx);
-        let central_frame = egui::Frame::new().fill(p.editor).inner_margin(egui::Margin {
-            left: 8,
-            right: 2,
-            top: 6,
-            bottom: 2,
-        });
-        egui::CentralPanel::default()
-            .frame(central_frame)
-            .show(root, |ui| {
-                if self.settings_active {
-                    self.settings_view(ctx, ui);
-                } else {
-                    self.editor(ctx, ui);
-                }
-            });
-
-        self.handle_resize_edges(ctx);
-
-        self.find_window(ctx);
-        self.goto_window(ctx);
-        self.about_window(ctx);
-        self.fif_window(ctx);
-        self.plugin_alert_windows(ctx);
-        self.reload_modal(ctx);
-        self.close_confirm_modal(ctx);
-
-        // status flash timeout
-        if let Some((_, shown_at)) = &mut self.status_msg {
-            let now = ctx.input(|i| i.time);
-            if *shown_at == 0.0 {
-                *shown_at = now;
-            } else if now - *shown_at > 3.0 {
-                self.status_msg = None;
-            }
-            ctx.request_repaint_after(std::time::Duration::from_millis(300));
-        }
-
-        // window title
-        let doc = &self.docs[self.active];
-        let title = format!(
-            "{}{} - Notey",
-            if doc.modified() { "*" } else { "" },
-            doc.title()
-        );
         if title != self.last_title {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            window.set_window_title(&title);
             self.last_title = title;
         }
-    }
 
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let b = |v: bool| if v { "1" } else { "0" }.to_string();
-        storage.set_string("dark", b(self.dark));
-        storage.set_string(
-            "theme_path",
-            self.custom_theme
-                .as_ref()
-                .map(|theme| theme.path.display().to_string())
-                .unwrap_or_default(),
-        );
-        storage.set_string("word_wrap", b(self.word_wrap));
-        storage.set_string("show_status", b(self.show_status));
-        storage.set_string("spell", b(self.spell_enabled));
-        storage.set_string("line_numbers", b(self.show_line_numbers));
-        storage.set_string("ligatures", b(self.ligatures));
-        storage.set_string("menu_bar", b(self.show_menu));
-        storage.set_string("tabs_left", b(self.tabs_left));
-        storage.set_string("editor_virtualized", b(self.preview_editor));
-        storage.set_string("font_size", self.font_size.to_string());
-        storage.set_string("zoom", self.zoom.to_string());
-        storage.set_string("line_height", self.line_height.to_string());
-        storage.set_string("tab_size", self.tab_size.to_string());
-        storage.set_string("editor_font", self.editor_font.clone());
-        storage.set_string("autosave", b(self.autosave));
-        storage.set_string("autosave_secs", self.autosave_secs.to_string());
-        let recent: Vec<String> = self
-            .recent_files
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
-        storage.set_string(
-            "recent_files",
-            serde_json::to_string(&recent).unwrap_or_default(),
-        );
-        // periodic + on-exit session snapshot (crash-safe unsaved tabs)
-        if self.is_primary {
-            session::save(&self.session_snapshot());
-        }
-    }
-}
-
-// ---------- helpers ----------
-
-/// The plugin commands of the editor's right-click menu, after a separator.
-fn context_plugin_items(
-    ui: &mut egui::Ui,
-    scripts: &[plugins::Script],
-    language: Option<&str>,
-) -> Option<(usize, String)> {
-    if !scripts.iter().flat_map(|s| &s.commands).any(|c| c.context) {
-        return None;
-    }
-    ui.separator();
-    plugin_command_items(ui, scripts, language, None)
-}
-
-/// Draw the plugin commands for one menu (a name from `plugins::MENUS`), or
-/// with `None`, the commands for the editor's right-click menu. Commands
-/// with a group go in a submenu, before the other commands. Returns the
-/// command that the user clicked.
-fn plugin_command_items(
-    ui: &mut egui::Ui,
-    scripts: &[plugins::Script],
-    language: Option<&str>,
-    menu: Option<&str>,
-) -> Option<(usize, String)> {
-    let wanted = |c: &plugins::PluginCommand| match menu {
-        Some(m) => c.menu == m,
-        None => c.context,
-    };
-    let mut run = None;
-    let mut groups: Vec<&str> = Vec::new();
-    for cmd in scripts.iter().flat_map(|s| &s.commands).filter(|c| wanted(c)) {
-        if let Some(g) = cmd.group.as_deref() {
-            if !groups.contains(&g) {
-                groups.push(g);
-            }
-        }
-    }
-    for g in groups {
-        ui.menu_button(g, |ui| {
-            for (i, script) in scripts.iter().enumerate() {
-                for cmd in script.commands.iter().filter(|c| wanted(c) && c.group.as_deref() == Some(g)) {
-                    if plugin_command_button(ui, script, cmd, language) {
-                        run = Some((i, cmd.id.clone()));
-                    }
-                }
-            }
-        });
-    }
-    for (i, script) in scripts.iter().enumerate() {
-        for cmd in script.commands.iter().filter(|c| wanted(c) && c.group.is_none()) {
-            if plugin_command_button(ui, script, cmd, language) {
-                run = Some((i, cmd.id.clone()));
-            }
-        }
-    }
-    run
-}
-
-fn plugin_command_button(
-    ui: &mut egui::Ui,
-    script: &plugins::Script,
-    cmd: &plugins::PluginCommand,
-    language: Option<&str>,
-) -> bool {
-    // focus conditions do not apply to menu clicks
-    let available = cmd.when.matches(language, true);
-    let mut button = match cmd.swatch {
-        Some(c) => egui::Button::new((egui::RichText::new("■").color(c), cmd.title.as_str())),
-        None => egui::Button::new(cmd.title.as_str()),
-    };
-    if !cmd.shortcut_text.is_empty() {
-        button = button.shortcut_text(cmd.shortcut_text.as_str());
-    }
-    let clicked = ui
-        .add_enabled(available, button)
-        .on_hover_text(format!("{} — {}", script.name, script.path.display()))
-        .clicked();
-    if clicked {
-        ui.close();
-    }
-    clicked
-}
-
-/// One entry of the tab strip.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TabRef {
-    Doc(usize),
-    Settings,
-}
-
-struct TabEntry {
-    tab: TabRef,
-    id: egui::Id,
-    label: String,
-    active: bool,
-}
-
-/// Paint a gear: a ring with 8 teeth.
-fn paint_gear(painter: &egui::Painter, c: egui::Pos2, r: f32, color: Color32) {
-    painter.circle_stroke(c, r * 0.62, egui::Stroke::new(1.3, color));
-    painter.circle_stroke(c, r * 0.22, egui::Stroke::new(1.0, color));
-    for k in 0..8 {
-        let a = k as f32 * std::f32::consts::TAU / 8.0;
-        let d = egui::vec2(a.cos(), a.sin());
-        painter.line_segment([c + d * (r * 0.62), c + d * r], egui::Stroke::new(2.2, color));
-    }
-}
-
-fn paint_cross(painter: &egui::Painter, c: egui::Pos2, h: f32, color: Color32) {
-    let s = egui::Stroke::new(1.1, color);
-    painter.line_segment([c + egui::vec2(-h, -h), c + egui::vec2(h, h)], s);
-    painter.line_segment([c + egui::vec2(-h, h), c + egui::vec2(h, -h)], s);
-}
-
-fn paint_plus(painter: &egui::Painter, c: egui::Pos2, h: f32, color: Color32) {
-    let s = egui::Stroke::new(1.2, color);
-    painter.line_segment([c + egui::vec2(-h, 0.0), c + egui::vec2(h, 0.0)], s);
-    painter.line_segment([c + egui::vec2(0.0, -h), c + egui::vec2(0.0, h)], s);
-}
-
-fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
-    ui.add(egui::Button::new(label).shortcut_text(shortcut))
-        .clicked()
-}
-
-fn key_event(key: Key, modifiers: Modifiers) -> egui::Event {
-    egui::Event::Key {
-        key,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers,
-    }
-}
-
-fn clipboard_text() -> Option<String> {
-    arboard::Clipboard::new().ok()?.get_text().ok()
-}
-
-/// Build the full font setup: UI fonts (Consolas / Segoe UI) plus a dedicated
-/// "editor" family pointing at the user's chosen font, with the monospace
-/// stack as glyph fallback.
-fn rebuild_fonts(ctx: &egui::Context, editor_font: Option<&std::path::Path>, tab_size: f32) {
-    let mut fonts = egui::FontDefinitions::default();
-    // prefer Segoe UI Variable (Win11) for UI text, fall back to Segoe UI
-    let ui_font = if std::path::Path::new("C:/Windows/Fonts/SegUIVar.ttf").exists() {
-        "SegUIVar.ttf"
-    } else {
-        "segoeui.ttf"
-    };
-    for (name, file, family) in [
-        ("Consolas", "consola.ttf", FontFamily::Monospace),
-        ("Segoe UI", ui_font, FontFamily::Proportional),
-    ] {
-        if let Some(bytes) = font_bytes(std::path::Path::new(&format!("C:/Windows/Fonts/{file}"))) {
-            fonts
-                .font_data
-                .insert(name.to_string(), Arc::new(egui::FontData::from_static(bytes)));
-            fonts
-                .families
-                .entry(family)
-                .or_default()
-                .insert(0, name.to_string());
-        }
-    }
-
-    let mut editor_stack: Vec<String> = Vec::new();
-    if let Some(path) = editor_font {
-        if let Some(bytes) = font_bytes(path) {
-            fonts.font_data.insert(
-                EDITOR_FONT_KEY.to_string(),
-                Arc::new(egui::FontData::from_static(bytes)),
-            );
-            editor_stack.push(EDITOR_FONT_KEY.to_string());
-        }
-    }
-    // fall back to the monospace stack for glyphs the chosen font lacks
-    if let Some(mono) = fonts.families.get(&FontFamily::Monospace) {
-        for name in mono {
-            if !editor_stack.contains(name) {
-                editor_stack.push(name.clone());
-            }
-        }
-    }
-
-    // apply the configured tab width to every font so it's consistent
-    let tab_size = tab_size.round().clamp(1.0, editor::MAX_TAB_SIZE as f32);
-    for fd in fonts.font_data.values_mut() {
-        if (fd.tweak.tab_size - tab_size).abs() > f32::EPSILON {
-            let mut f = (**fd).clone();
-            f.tweak.tab_size = tab_size;
-            *fd = Arc::new(f);
-        }
-    }
-
-    // One copy of the editor stack for each tab width, so that a tab can go
-    // to the next tab stop (see `editor::apply_tab_stops`). The font bytes
-    // are static, thus each copy is small.
-    for cols in 1..=editor::MAX_TAB_SIZE {
-        let mut stack = Vec::with_capacity(editor_stack.len());
-        for name in &editor_stack {
-            let Some(fd) = fonts.font_data.get(name) else { continue };
-            let mut f = (**fd).clone();
-            f.tweak.tab_size = cols as f32;
-            let key = format!("{name}#tab{cols}");
-            fonts.font_data.insert(key.clone(), Arc::new(f));
-            stack.push(key);
-        }
-        fonts.families.insert(editor::tab_family(cols), stack);
-    }
-    fonts.families.insert(editor_family(), editor_stack);
-    ctx.set_fonts(fonts);
-}
-
-/// Font file bytes that live for the whole run. Each file is read one time,
-/// so the tab-width copies of a font and later font changes share the bytes.
-fn font_bytes(path: &std::path::Path) -> Option<&'static [u8]> {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, &'static [u8]>>> = OnceLock::new();
-    let mut cache = CACHE.get_or_init(Default::default).lock().ok()?;
-    if let Some(bytes) = cache.get(path) {
-        return Some(bytes);
-    }
-    let bytes: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
-    cache.insert(path.to_path_buf(), bytes);
-    Some(bytes)
-}
-
-/// Installed fonts from the Windows registry: display name -> font file path.
-fn system_fonts() -> Vec<(String, PathBuf)> {
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
-    use winreg::RegKey;
-
-    let mut out: Vec<(String, PathBuf)> = Vec::new();
-    let fonts_dir = PathBuf::from(
-        std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into()),
-    )
-    .join("Fonts");
-
-    for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
-        let Ok(key) = RegKey::predef(hive)
-            .open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")
-        else {
-            continue;
+        let p = self.palette;
+        let body = if self.settings_active {
+            self.settings_page(cx).into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .min_h_0()
+                .children(self.tabs.get(self.active).map(|t| t.view.clone()))
+                .into_any_element()
         };
-        for item in key.enum_values() {
-            let Ok((name, _)) = item else { continue };
-            let Ok(file) = key.get_value::<String, _>(&name) else { continue };
-            let lower = file.to_lowercase();
-            if !(lower.ends_with(".ttf") || lower.ends_with(".otf") || lower.ends_with(".ttc"))
-            {
-                continue;
-            }
-            let path = if file.contains('\\') || file.contains('/') {
-                PathBuf::from(&file)
-            } else {
-                fonts_dir.join(&file)
-            };
-            // strip " (TrueType)" style suffixes
-            let clean = name
-                .rsplit_once(" (")
-                .map(|(a, _)| a.to_string())
-                .unwrap_or(name);
-            out.push((clean, path));
-        }
+        let root = div()
+            .id("notey")
+            .key_context("Notey")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(p.chrome)
+            .text_color(p.text)
+            .font_family(UI_FONT)
+            .text_size(px(13.))
+            .child(self.title_bar(window, cx))
+            .when(self.settings.show_menu, |d| d.child(self.menu_bar(cx)))
+            .child(div().h(px(1.)).flex_none().bg(p.stroke))
+            .child(body)
+            .when(self.settings.show_status, |d| d.child(self.status_bar(cx)));
+        self.register_actions(root, cx)
     }
-    out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-    out.dedup_by(|a, b| a.0 == b.0);
-    out
 }
 
-
-fn char_to_byte(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(b, _)| b)
-        .unwrap_or(s.len())
-}
-
-fn line_col(text: &str, char_idx: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut col = 1;
-    for (i, ch) in text.chars().enumerate() {
-        if i == char_idx {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
-}
-
-fn prev_char(text: &str, char_idx: usize) -> Option<char> {
-    if char_idx == 0 {
-        return None;
-    }
-    text.chars().nth(char_idx - 1)
-}
-
-/// Word (alphabetic run) containing char index `idx`; returns char range + word.
-fn word_at(text: &str, idx: usize) -> Option<(usize, usize, String)> {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.is_empty() {
-        return None;
-    }
-    let i = idx.min(chars.len().saturating_sub(1));
-    let probe = if spell::is_word_char(chars[i]) {
-        i
-    } else if i > 0 && spell::is_word_char(chars[i - 1]) {
-        i - 1
-    } else {
-        return None;
-    };
-    let mut a = probe;
-    while a > 0 && spell::is_word_char(chars[a - 1]) {
-        a -= 1;
-    }
-    let mut b = probe + 1;
-    while b < chars.len() && spell::is_word_char(chars[b]) {
-        b += 1;
-    }
-    let word: String = chars[a..b].iter().collect();
-    Some((a, b, word))
-}
-
-/// Append `text` to `job`, marking misspelled words with the `bad` format.
-fn append_spellchecked(
-    job: &mut LayoutJob,
-    text: &str,
-    spell: &Spell,
-    normal: &TextFormat,
-    bad: &TextFormat,
-) {
-    let mut chunk_start = 0usize; // byte index of pending normal text
-    let mut prev: Option<char> = None;
-    let mut iter = text.char_indices().peekable();
-    while let Some((i, c)) = iter.next() {
-        if spell::is_word_char(c) {
-            // scan to end of word
-            let start = i;
-            let mut end = i + c.len_utf8();
-            while let Some(&(j, cj)) = iter.peek() {
-                if spell::is_word_char(cj) {
-                    end = j + cj.len_utf8();
-                    iter.next();
-                } else {
-                    break;
-                }
-            }
-            let word = &text[start..end];
-            let misspelled = spell::checkable(word, prev) && !spell.check(word);
-            if misspelled {
-                if chunk_start < start {
-                    job.append(&text[chunk_start..start], 0.0, normal.clone());
-                }
-                job.append(word, 0.0, bad.clone());
-                chunk_start = end;
-            }
-            prev = word.chars().last();
-        } else {
-            prev = Some(c);
-        }
-    }
-    if chunk_start < text.len() {
-        job.append(&text[chunk_start..], 0.0, normal.clone());
-    }
+fn documents_dir() -> PathBuf {
+    std::env::var_os("USERPROFILE")
+        .map(|home| PathBuf::from(home).join("Documents"))
+        .unwrap_or_default()
 }

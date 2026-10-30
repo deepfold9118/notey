@@ -1,6 +1,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use codemirror_state::Text;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
     Utf8,
@@ -11,6 +13,9 @@ pub enum Encoding {
 }
 
 impl Encoding {
+    pub const ALL: [Encoding; 5] =
+        [Encoding::Utf8, Encoding::Utf8Bom, Encoding::Utf16Le, Encoding::Utf16Be, Encoding::Ansi];
+
     pub fn label(self) -> &'static str {
         match self {
             Encoding::Utf8 => "UTF-8",
@@ -29,6 +34,8 @@ pub enum LineEnding {
 }
 
 impl LineEnding {
+    pub const ALL: [LineEnding; 2] = [LineEnding::Crlf, LineEnding::Lf];
+
     pub fn label(self) -> &'static str {
         match self {
             LineEnding::Crlf => "Windows (CRLF)",
@@ -37,17 +44,16 @@ impl LineEnding {
     }
 }
 
+/// A file (or untitled buffer) open in a tab. The editor state holds the
+/// text; the document holds where it is saved, how it is encoded, and the
+/// text as last saved, to tell whether the editor's text is modified.
 pub struct Document {
     pub id: u64,
     pub path: Option<PathBuf>,
-    pub text: String,
-    saved_text: String,
+    saved: Text,
     pub encoding: Encoding,
     pub line_ending: LineEnding,
     pub untitled_n: usize,
-    /// Bumped whenever `text` is mutated outside the preview editor so it
-    /// can rebuild its line index.
-    pub revision: u64,
     /// Syntax name for highlighting; None = plain text.
     pub language: Option<String>,
     /// Last known on-disk modification time (None for untitled docs or
@@ -60,22 +66,17 @@ impl Document {
         Self {
             id,
             path: None,
-            text: String::new(),
-            saved_text: String::new(),
+            saved: Text::empty(),
             encoding: Encoding::Utf8,
             line_ending: LineEnding::Crlf,
             untitled_n,
-            revision: 0,
             language: None,
             disk_mtime: None,
         }
     }
 
-    pub fn touch(&mut self) {
-        self.revision += 1;
-    }
-
-    pub fn open(id: u64, path: &Path) -> io::Result<Self> {
+    /// Read a file. Returns the document and its text, with `\n` line breaks.
+    pub fn open(id: u64, path: &Path) -> io::Result<(Self, String)> {
         let bytes = std::fs::read(path)?;
         let (raw, encoding) = decode(&bytes);
         let line_ending = if raw.contains("\r\n") {
@@ -86,58 +87,28 @@ impl Document {
             LineEnding::Crlf
         };
         let text = raw.replace("\r\n", "\n").replace('\r', "\n");
-        Ok(Self {
+        let doc = Self {
             id,
             path: Some(path.to_path_buf()),
-            saved_text: text.clone(),
-            text,
+            saved: Text::from(text.as_str()),
             encoding,
             line_ending,
             untitled_n: 0,
-            revision: 0,
-            language: crate::syntax::detect(path),
+            language: None,
             disk_mtime: std::fs::metadata(path).and_then(|m| m.modified()).ok(),
-        })
-    }
-
-    /// Re-read the file from disk, discarding the in-memory buffer.
-    pub fn reload(&mut self) -> io::Result<()> {
-        let path = self
-            .path
-            .clone()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no file path"))?;
-        let language = self.language.clone();
-        let fresh = Self::open(self.id, &path)?;
-        self.text = fresh.text;
-        self.saved_text = fresh.saved_text;
-        self.encoding = fresh.encoding;
-        self.line_ending = fresh.line_ending;
-        self.disk_mtime = fresh.disk_mtime;
-        self.language = language; // keep a manual language choice
-        self.touch();
-        Ok(())
-    }
-
-    /// Recreate an untitled tab from session data (always marked modified).
-    pub fn restore_untitled(id: u64, untitled_n: usize, text: String) -> Self {
-        let mut doc = Self::new(id, untitled_n);
-        doc.text = text;
-        doc
+        };
+        Ok((doc, text))
     }
 
     /// Recreate a file-backed tab with unsaved changes from session data.
     /// The on-disk content (if readable) becomes the saved baseline so the
     /// modified indicator and Save work as expected.
-    pub fn restore_file(id: u64, path: &Path, text: String) -> Self {
+    pub fn restore_file(id: u64, path: &Path) -> Self {
         match Self::open(id, path) {
-            Ok(mut doc) => {
-                doc.text = text;
-                doc
-            }
+            Ok((doc, _)) => doc,
             Err(_) => {
                 let mut doc = Self::new(id, 0);
                 doc.path = Some(path.to_path_buf());
-                doc.text = text;
                 doc
             }
         }
@@ -153,25 +124,26 @@ impl Document {
         }
     }
 
-    pub fn modified(&self) -> bool {
-        self.text != self.saved_text
+    /// Whether `text` differs from the text as last saved.
+    pub fn modified(&self, text: &Text) -> bool {
+        *text != self.saved
     }
 
-    pub fn save(&mut self) -> io::Result<()> {
+    pub fn save(&mut self, text: &Text) -> io::Result<()> {
         let path = self
             .path
             .clone()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no file path"))?;
-        std::fs::write(&path, self.encode())?;
-        self.saved_text = self.text.clone();
+        std::fs::write(&path, self.encode(&text.to_string()))?;
+        self.saved = text.clone();
         self.disk_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
         Ok(())
     }
 
-    fn encode(&self) -> Vec<u8> {
+    fn encode(&self, text: &str) -> Vec<u8> {
         let text = match self.line_ending {
-            LineEnding::Crlf => self.text.replace('\n', "\r\n"),
-            LineEnding::Lf => self.text.clone(),
+            LineEnding::Crlf => text.replace('\n', "\r\n"),
+            LineEnding::Lf => text.to_string(),
         };
         match self.encoding {
             Encoding::Utf8 => text.into_bytes(),
