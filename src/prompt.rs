@@ -2,20 +2,20 @@
 //! style, as the egui version did, rather than as Windows task dialogs.
 //! The first button is the default (Enter), the last one cancels (Escape).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use gpui::{
     div, prelude::*, px, App, Context, EventEmitter, FocusHandle, Focusable, KeyDownEvent, PromptButton, PromptHandle,
     PromptLevel, PromptResponse, RenderablePromptHandle, SharedString, Window,
 };
 
-use crate::theme::palette;
+use crate::theme::{palette, Palette};
 
-static DARK: AtomicBool = AtomicBool::new(true);
+static PALETTE: Mutex<Option<Palette>> = Mutex::new(None);
 
-/// Follow the theme setting.
-pub fn set_dark(dark: bool) {
-    DARK.store(dark, Ordering::Relaxed);
+/// Follow the theme.
+pub fn set_palette(p: Palette) {
+    *PALETTE.lock().unwrap() = Some(p);
 }
 
 /// Use the Fluent prompt for every dialog.
@@ -60,7 +60,7 @@ impl Focusable for FluentPrompt {
 
 impl Render for FluentPrompt {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(DARK.load(Ordering::Relaxed));
+        let p = PALETTE.lock().unwrap().unwrap_or_else(|| palette(true));
         let last = self.actions.len().saturating_sub(1);
         let buttons = self.actions.iter().enumerate().map(|(i, label)| {
             let primary = i == 0;
@@ -119,5 +119,35 @@ impl Render for FluentPrompt {
             .font_family("Segoe UI")
             .occlude()
             .child(dialog)
+    }
+}
+
+/// A hover tooltip with `text`, for `.tooltip(...)`.
+pub fn tooltip(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) -> gpui::AnyView + 'static {
+    let text = text.into();
+    move |_, cx| cx.new(|_| Tooltip(text.clone())).into()
+}
+
+struct Tooltip(SharedString);
+
+impl Render for Tooltip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = PALETTE.lock().unwrap().unwrap_or_else(|| palette(true));
+        // GPUI places the tooltip at the pointer; the margin keeps it clear.
+        div().pl_2().pt_5().child(
+            div()
+                .max_w(px(420.))
+                .px_2()
+                .py_1()
+                .rounded(px(4.))
+                .bg(p.popup)
+                .border_1()
+                .border_color(p.stroke)
+                .shadow_md()
+                .text_color(p.text)
+                .text_size(px(12.))
+                .font_family("Segoe UI")
+                .child(self.0.clone()),
+        )
     }
 }

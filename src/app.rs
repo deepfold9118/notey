@@ -9,6 +9,10 @@ mod find_in_files;
 mod languages;
 mod settings_tab;
 mod spelling;
+mod themes;
+mod plugins_ui;
+mod preview;
+mod scripting;
 mod watch;
 
 pub use watch::initial_bounds;
@@ -110,6 +114,8 @@ struct Tab {
     seen: EditorState,
     /// Set by the editor's update listener when the text changes.
     doc_changed: Arc<AtomicBool>,
+    /// Text the user typed since the last check, for plugin `input` events.
+    typed: Arc<std::sync::Mutex<String>>,
     /// Counts text changes.
     version: u64,
     modified: bool,
@@ -156,6 +162,19 @@ pub struct NoteyApp {
     open_menu: Option<Menu>,
     find: find::FindBar,
     fif: find_in_files::FifPanel,
+    settings_ui: settings_tab::SettingsUi,
+    theme_ui: themes::ThemeUi,
+    /// The imported theme in use, if any.
+    custom_theme: Option<crate::theme_import::ImportedTheme>,
+    plugins: plugins_ui::PluginsUi,
+    languages: languages::LanguagesUi,
+    scripting: scripting::Scripting,
+    previews: preview::Previews,
+    /// The open submenu of a menu, and whether the pointer is over it.
+    open_submenu: Option<SharedString>,
+    submenu_hovered: bool,
+    /// The tab list on the left is being resized.
+    resizing_tab_list: bool,
     status_msg: Option<SharedString>,
     flash_task: Option<Task<()>>,
     /// Owns the single-instance socket and the saved session. Secondary
@@ -193,6 +212,10 @@ impl NoteyApp {
         };
         let find = find::FindBar::new(&palette(settings.dark), cx);
         let fif = find_in_files::FifPanel::new(&palette(settings.dark), cx);
+        let settings_ui = settings_tab::SettingsUi::new(&palette(settings.dark), cx);
+        let theme_ui = themes::ThemeUi::new(&palette(settings.dark), cx);
+        let plugins = plugins_ui::PluginsUi::new(&palette(settings.dark), cx);
+        let languages = languages::LanguagesUi::new(&palette(settings.dark), cx);
         let mut app = NoteyApp {
             tabs: Vec::new(),
             active: 0,
@@ -206,6 +229,16 @@ impl NoteyApp {
             open_menu: None,
             find,
             fif,
+            settings_ui,
+            theme_ui,
+            custom_theme: None,
+            plugins,
+            languages,
+            scripting: Default::default(),
+            previews: Default::default(),
+            open_submenu: None,
+            submenu_hovered: false,
+            resizing_tab_list: false,
             status_msg: None,
             flash_task: None,
             is_primary,
@@ -220,6 +253,8 @@ impl NoteyApp {
             last_autosave: std::time::Instant::now(),
             _tasks: Vec::new(),
         };
+        app.load_saved_theme();
+        app.apply_palette(cx);
         if is_primary {
             app.restore_session(cx);
         }
@@ -263,6 +298,7 @@ impl NoteyApp {
         });
         app.start_spell_load(cx);
         app.start_syntax_build(cx);
+        app.start_scripting(cx);
         app.focus_active(window, cx);
         app
     }
@@ -291,6 +327,7 @@ impl NoteyApp {
                 name: name.to_string(),
                 dark: self.settings.dark,
                 generation: crate::syntax::generation(),
+                theme: self.custom_theme.as_ref().map(|t| t.syntax.clone()),
             }));
         }
         if let (true, Some(spell)) = (self.settings.spellcheck, &self.spell) {
@@ -307,6 +344,8 @@ impl NoteyApp {
         bindings.extend(search_keymap());
         let doc_changed = Arc::new(AtomicBool::new(false));
         let flag = doc_changed.clone();
+        let typed = Arc::new(std::sync::Mutex::new(String::new()));
+        let typed_in = typed.clone();
         let extensions = Extension::list([
             history(HistoryConfig::default()),
             keymap(bindings),
@@ -315,7 +354,14 @@ impl NoteyApp {
                 if update.doc_changed() {
                     flag.store(true, Ordering::Relaxed);
                 }
+                for tr in &update.transactions {
+                    if tr.is_user_event("input.type") {
+                        let mut typed = typed_in.lock().unwrap();
+                        tr.changes().iter_changes(|_, _, _, _, text| typed.push_str(&text.to_string()), false);
+                    }
+                }
             })),
+            crate::styles::text_styles(),
             self.config.of(self.editor_config(doc.language.as_deref())),
         ]);
         let state = EditorState::create(EditorStateConfig::new().doc(text).extensions(extensions));
@@ -326,6 +372,7 @@ impl NoteyApp {
             view,
             seen: state.clone(),
             doc_changed,
+            typed,
             version: 0,
             modified: false,
             chars: 0,
@@ -355,6 +402,10 @@ impl NoteyApp {
         }
         if self.tabs.get(self.active).is_some_and(|t| t.view == *view) {
             self.find_editor_changed(was_open, cx);
+            let typed = std::mem::take(&mut *self.tabs[self.active].typed.lock().unwrap());
+            self.scripting.pending_typed.push_str(&typed);
+            self.scripting.pending_doc_change |= doc_changed;
+            self.scripting.pending_check = true;
         }
         cx.notify();
     }
@@ -481,6 +532,7 @@ impl NoteyApp {
                     self.tabs.clear();
                 }
                 let idx = self.add_tab(doc, text, cx);
+                self.scripting.queued.push(("buffer_opened".into(), Some(path.display().to_string())));
                 self.activate(idx, window, cx);
                 self.note_recent(&path);
             }
@@ -521,6 +573,9 @@ impl NoteyApp {
             Ok(()) => {
                 tab.modified = false;
                 if let Some(path) = tab.doc.path.clone() {
+                    if idx == self.active {
+                        self.scripting.queued.push(("after_save".into(), Some(path.display().to_string())));
+                    }
                     self.note_recent(&path);
                 }
                 self.session_dirty = true;
@@ -664,15 +719,24 @@ impl NoteyApp {
     /// Change the settings, then apply and save them.
     fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         change(&mut self.settings);
-        self.palette = palette(self.settings.dark);
-        crate::prompt::set_dark(self.settings.dark);
-        self.find.set_palette(&self.palette, cx);
-        self.fif.set_palette(&self.palette, cx);
+        self.apply_palette(cx);
         for i in 0..self.tabs.len() {
             self.reconfigure_tab(i, cx);
         }
         self.settings.save();
         cx.notify();
+    }
+
+    /// Use the current palette in the window's own controls.
+    fn apply_palette(&mut self, cx: &mut Context<Self>) {
+        self.palette = self.current_palette();
+        crate::prompt::set_palette(self.palette);
+        self.find.set_palette(&self.palette, cx);
+        self.fif.set_palette(&self.palette, cx);
+        self.settings_ui.set_palette(&self.palette, cx);
+        self.theme_ui.set_palette(&self.palette, cx);
+        self.plugins.set_palette(&self.palette, cx);
+        self.languages.set_palette(&self.palette, cx);
     }
 
     /// Apply the settings and the tab's language to its editor.
@@ -734,12 +798,15 @@ impl NoteyApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &Open, window, cx| this.open_dialog(window, cx)))
-            .on_action(cx.listener(|this, _: &Save, _, cx| {
+            .on_action(cx.listener(|this, _: &Save, window, cx| {
+                // Scripts may change the text before it is written.
+                this.fire_event("before_save", None, window, cx);
                 if let Some(tab) = this.tabs.get(this.active) {
                     this.save_by_id(tab.doc.id, cx).detach();
                 }
             }))
-            .on_action(cx.listener(|this, _: &SaveAs, _, cx| {
+            .on_action(cx.listener(|this, _: &SaveAs, window, cx| {
+                this.fire_event("before_save", None, window, cx);
                 if let Some(tab) = this.tabs.get(this.active) {
                     this.save_as_by_id(tab.doc.id, cx).detach();
                 }
@@ -809,12 +876,13 @@ impl Render for NoteyApp {
 
         let p = self.palette;
         let body = if self.settings_active {
-            self.settings_page(cx).into_any_element()
+            self.settings_page(window, cx).into_any_element()
         } else {
-            div()
+            let editor = div()
                 .relative()
                 .flex_1()
                 .min_h_0()
+                .min_w_0()
                 .on_mouse_down(
                     gpui::MouseButton::Right,
                     cx.listener(|this, event, window, cx| this.open_context_menu(event, window, cx)),
@@ -822,11 +890,31 @@ impl Render for NoteyApp {
                 .children(self.tabs.get(self.active).map(|t| t.view.clone()))
                 .children(self.find_bar(window, cx))
                 .children(self.context_popup(cx))
-                .into_any_element()
+                .into_any_element();
+            match self.markdown_view(cx) {
+                // The rendered Markdown in place of the editor.
+                Some((view, true)) => div().flex_1().min_h_0().flex().child(view).into_any_element(),
+                Some((view, false)) => div().flex_1().min_h_0().flex().child(editor).child(view).into_any_element(),
+                None => editor,
+            }
         };
+        if self.script_events_due() {
+            cx.defer_in(window, |this, window, cx| this.flush_script_events(window, cx));
+        }
+        // The document area, with Find in Files below it.
+        let main = div().flex_1().min_h_0().min_w_0().flex().flex_col().child(body).children(self.find_in_files_panel(cx));
+        let main = if self.settings.tabs_left {
+            div().flex_1().min_h_0().flex().child(self.left_tab_panel(cx)).child(main).into_any_element()
+        } else {
+            main.into_any_element()
+        };
+        let status = self.settings.show_status.then(|| self.status_bar(window, cx).into_any_element());
         let root = div()
             .id("notey")
             .key_context("Notey")
+            .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.resize_tab_list(e.position.x, cx)))
+            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _, _, _| this.end_tab_list_resize()))
+            .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| this.plugin_key(event, window, cx)))
             .track_focus(&self.focus_handle)
             .size_full()
             .flex()
@@ -838,9 +926,8 @@ impl Render for NoteyApp {
             .child(self.title_bar(window, cx))
             .when(self.settings.show_menu, |d| d.child(self.menu_bar(cx)))
             .child(div().h(px(1.)).flex_none().bg(p.stroke))
-            .child(body)
-            .children(self.find_in_files_panel(cx))
-            .when(self.settings.show_status, |d| d.child(self.status_bar(cx)));
+            .child(main)
+            .children(status);
         let root = self.register_actions(root, cx);
         self.register_find_actions(root, cx)
     }

@@ -117,6 +117,11 @@ impl NoteyApp {
             Item::Separator,
             chrome::action("Select All", "Ctrl+A", SelectAll),
         ]);
+        let plugin_items = self.plugin_items(None);
+        if !plugin_items.is_empty() {
+            items.push(Item::Separator);
+            items.extend(plugin_items);
+        }
         items
     }
 

@@ -48,6 +48,19 @@ pub(super) enum Item {
     Choice { label: SharedString, checked: Option<bool>, choose: Choose },
     Heading(SharedString),
     Separator,
+    /// A plugin command.
+    Plugin {
+        label: SharedString,
+        shortcut: SharedString,
+        swatch: Option<gpui::Hsla>,
+        enabled: bool,
+        script: usize,
+        cmd: String,
+        /// The script behind the command, for the tooltip.
+        source: SharedString,
+    },
+    /// A submenu (a plugin command group).
+    Submenu { label: SharedString, items: Vec<Item> },
 }
 
 pub(super) fn action(label: &'static str, shortcut: &'static str, action: impl Action) -> Item {
@@ -101,13 +114,18 @@ impl NoteyApp {
                 Item::Separator,
                 action("Find…", "Ctrl+F", find::Find),
                 action("Replace…", "Ctrl+H", find::Replace),
-                action("Find Next", "F3", find::FindNext),
-                action("Find Previous", "Shift+F3", find::FindPrevious),
                 action("Find in Files…", "Ctrl+Shift+F", super::find_in_files::FindInFiles),
                 action("Go To…", "Ctrl+G", find::GoTo),
                 Item::Separator,
                 action("Settings", "Ctrl+,", OpenSettings),
-            ],
+            ]
+            .into_iter()
+            .chain(crate::plugins::MENUS.iter().flat_map(|menu| {
+                let items = self.plugin_items(Some(menu));
+                let sep = (!items.is_empty()).then_some(Item::Separator);
+                sep.into_iter().chain(items)
+            }))
+            .collect(),
             Menu::Help => vec![action("About Notey", "", About)],
             Menu::Context => self.context_menu_items(),
             Menu::All => {
@@ -133,7 +151,8 @@ impl NoteyApp {
                     })
                     .collect()
             }
-            Menu::Language => self.language_menu_items(),
+            // The language picker is its own popup (`language_popup`).
+            Menu::Language => Vec::new(),
             Menu::LineEnding => {
                 let current = self.tabs[self.active].doc.line_ending;
                 LineEnding::ALL
@@ -163,16 +182,82 @@ impl NoteyApp {
     }
 
     fn toggle_menu(&mut self, menu: Menu, cx: &mut Context<Self>) {
+        self.open_submenu = None;
+        self.submenu_hovered = false;
         self.open_menu = if self.open_menu == Some(menu) { None } else { Some(menu) };
+        self.languages.focus_pending = self.open_menu == Some(Menu::Language);
         cx.notify();
+    }
+
+    /// The plugin commands for one menu (a name from `plugins::MENUS`), or
+    /// with `None`, the commands for the editor's right-click menu. Commands
+    /// with a group go in a submenu, before the other commands.
+    pub(super) fn plugin_items(&self, menu: Option<&str>) -> Vec<Item> {
+        let scripts = &self.scripting.host.scripts;
+        let language = self.tabs.get(self.active).and_then(|t| t.doc.language.clone());
+        let wanted = |c: &crate::plugins::PluginCommand| match menu {
+            Some(m) => c.menu == m,
+            None => c.context,
+        };
+        let item = |i: usize, c: &crate::plugins::PluginCommand| Item::Plugin {
+            label: c.title.clone().into(),
+            shortcut: c.shortcut_text.clone().into(),
+            swatch: c.swatch,
+            // Focus conditions do not apply to menu clicks.
+            enabled: c.when.matches(language.as_deref(), true),
+            script: i,
+            cmd: c.id.clone(),
+            source: format!("{} \u{2014} {}", scripts[i].name, scripts[i].path.display()).into(),
+        };
+        let mut groups: Vec<String> = Vec::new();
+        for c in scripts.iter().flat_map(|s| &s.commands).filter(|c| wanted(c)) {
+            if let Some(g) = &c.group {
+                if !groups.contains(g) {
+                    groups.push(g.clone());
+                }
+            }
+        }
+        let mut items: Vec<Item> = groups
+            .into_iter()
+            .map(|g| Item::Submenu {
+                items: scripts
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, s)| s.commands.iter().map(move |c| (i, c)))
+                    .filter(|(_, c)| wanted(c) && c.group.as_deref() == Some(g.as_str()))
+                    .map(|(i, c)| item(i, c))
+                    .collect(),
+                label: g.into(),
+            })
+            .collect();
+        for (i, s) in scripts.iter().enumerate() {
+            items.extend(s.commands.iter().filter(|c| wanted(c) && c.group.is_none()).map(|c| item(i, c)));
+        }
+        items
     }
 
     pub(super) fn menu_panel(&self, menu: Menu, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        let rows = self.menu_items(menu).into_iter().enumerate().map(|(i, item)| -> AnyElement {
+        self.item_list("menu", self.menu_items(menu), cx)
+            // The language picker has a line per installed file type.
+            .when(menu == Menu::Language, |d| d.max_h(px(440.)).overflow_y_scroll())
+            .on_mouse_down_out(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                if !this.in_menu_trigger(ev.position, window) && !this.submenu_hovered {
+                    this.open_menu = None;
+                    this.open_submenu = None;
+                    cx.notify();
+                }
+            }))
+            .bg(p.popup)
+    }
+
+    /// A menu panel with `items`; submenus open beside their row on hover.
+    fn item_list(&self, id: &'static str, items: Vec<Item>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let p = self.palette;
+        let rows = items.into_iter().enumerate().map(|(i, item)| -> AnyElement {
             let row = || {
                 div()
-                    .id(("menu-item", i))
+                    .id((id, i))
                     .mx_1()
                     .px_3()
                     .h(px(30.))
@@ -183,6 +268,66 @@ impl NoteyApp {
                     .hover(|s| s.bg(p.control_hover))
             };
             match item {
+                Item::Plugin { label, shortcut, swatch, enabled, script, cmd, source } => row()
+                    .tooltip(crate::prompt::tooltip(source))
+                    .justify_between()
+                    .when(!enabled, |d| d.text_color(p.text_weak))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .when_some(swatch, |d, c| {
+                                d.child(div().size(px(12.)).rounded(px(2.)).bg(c).border_1().border_color(p.stroke))
+                            })
+                            .child(label),
+                    )
+                    .child(div().text_color(p.text_weak).child(shortcut))
+                    .when(enabled, |d| {
+                        d.on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_menu = None;
+                            this.open_submenu = None;
+                            this.submenu_hovered = false;
+                            this.focus_active(window, cx);
+                            this.run_plugin_command(script, &cmd, window, cx);
+                            cx.notify();
+                        }))
+                    })
+                    .into_any_element(),
+                Item::Submenu { label, items } => {
+                    let open = self.open_submenu.as_ref() == Some(&label);
+                    let hover_label = label.clone();
+                    let mut row = row()
+                        .relative()
+                        .justify_between()
+                        .when(open, |d| d.bg(p.control_hover))
+                        .child(label.clone())
+                        .child(div().font_family(self.icon_font.clone()).text_size(px(9.)).child("\u{E76C}"))
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered && this.open_submenu.as_ref() != Some(&hover_label) {
+                                this.open_submenu = Some(hover_label.clone());
+                                cx.notify();
+                            }
+                        }));
+                    if open {
+                        let panel = self
+                            .item_list("submenu", items, cx)
+                            .bg(p.popup)
+                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                this.submenu_hovered = *hovered;
+                                cx.notify();
+                            }));
+                        // Not deferred: the menu itself is, and GPUI does not nest them.
+                        row = row.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left(relative(1.))
+                                .child(anchored().snap_to_window_with_margin(px(8.)).child(panel)),
+                        );
+                    }
+                    row.into_any_element()
+                }
                 Item::Action { label, shortcut, action } => row()
                     .justify_between()
                     .child(label)
@@ -213,24 +358,15 @@ impl NoteyApp {
             }
         });
         div()
-            .id("menu")
+            .id(id)
             .occlude()
             .min_w(px(200.))
             .max_w(px(520.))
-            .max_h(px(440.))
-            .overflow_y_scroll()
             .py_1()
-            .bg(p.popup)
             .border_1()
             .border_color(p.stroke)
             .rounded(px(8.))
             .shadow_lg()
-            .on_mouse_down_out(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
-                if !this.in_menu_trigger(ev.position, window) {
-                    this.open_menu = None;
-                    cx.notify();
-                }
-            }))
             .children(rows)
     }
 
@@ -311,6 +447,7 @@ impl NoteyApp {
             .text_size(px(12.))
             .hover(|s| s.bg(p.tab_hover))
             .child("\u{E710}")
+            .tooltip(crate::prompt::tooltip("New tab (Ctrl+N)"))
             .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx)));
 
         let caption = |id: &'static str, glyph: &'static str, area: WindowControlArea, close: bool| {
@@ -339,8 +476,9 @@ impl NoteyApp {
             .flex_none()
             .items_end()
             .child(icon)
-            .child(div().flex().flex_row().items_end().min_w_0().overflow_hidden().children(tabs))
-            .child(new_tab)
+            .when(!self.settings.tabs_left, |d| {
+                d.child(div().flex().flex_row().items_end().min_w_0().overflow_hidden().children(tabs)).child(new_tab)
+            })
             .child(div().flex_1().h_full().window_control_area(WindowControlArea::Drag))
             .child(
                 div()
@@ -438,7 +576,8 @@ impl NoteyApp {
             .child(button(Menu::Help, "Help"))
     }
 
-    pub(super) fn status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn status_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let language_popup = self.language_popup(window, cx);
         let p = self.palette;
         let sep = || div().w(px(1.)).h(px(14.)).bg(p.stroke);
         let item = |id: &'static str, label: SharedString, menu: Option<Menu>, cx: &mut Context<Self>| {
@@ -454,11 +593,24 @@ impl NoteyApp {
                     .when_some(menu, |d, menu| {
                         d.hover(|s| s.bg(p.control_hover))
                             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| this.toggle_menu(menu, cx)))
-                    }),
+                    })
+                    .when_some(
+                        match id {
+                            "language" => Some("Syntax highlighting language"),
+                            "line-ending" => Some("Line endings used when saving"),
+                            "encoding" => Some("Encoding used when saving"),
+                            _ => None,
+                        },
+                        |d, tip| d.when(menu.is_none_or(|m| self.open_menu != Some(m)), |d| d.tooltip(crate::prompt::tooltip(tip))),
+                    ),
             )
         };
         let mut right = div().flex().items_center().gap_1();
         let mut left = div().flex_1().min_w_0().flex().items_center().gap_1();
+        // With the tabs on the left, the gear is at the bottom of the tab list.
+        if !self.settings.tabs_left {
+            left = left.child(self.gear_button(cx)).child(sep());
+        }
         if !self.settings_active {
             if let Some(tab) = self.tabs.get(self.active) {
                 let pos = match &self.status_msg {
@@ -466,6 +618,33 @@ impl NoteyApp {
                     None => format!("Ln {}, Col {}", tab.line, tab.col).into(),
                 };
                 left = left.child(item("pos", pos, None, cx));
+                let hint = match (&tab.doc.path, &tab.doc.language, &self.status_msg) {
+                    (Some(path), None, None) => self.plugins.suggestion_for(path).map(|m| (m.id.clone(), m.name.clone())),
+                    _ => None,
+                };
+                if let Some((id, name)) = hint {
+                    left = left.child(
+                        div()
+                            .id("install-filetype")
+                            .h(px(20.))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .rounded(px(4.))
+                            .bg(p.control_hover)
+                            .border_1()
+                            .border_color(p.stroke)
+                            .hover(|s| s.bg(p.control_active))
+                            .text_color(p.text)
+                            .child(format!("Install {name} highlighting"))
+                            .on_click(cx.listener(move |this, _, _, cx| this.install_plugin(&id, cx))),
+                    );
+                }
+                for (i, (_, text, tip)) in self.scripting.status_items.iter().enumerate() {
+                    let item = div().id(("plugin-status", i)).px_2().child(text.clone());
+                    let item = if tip.is_empty() { item } else { item.tooltip(crate::prompt::tooltip(tip.clone())) };
+                    right = right.child(item).child(sep());
+                }
                 right = right
                     .child(item("chars", format!("{} characters", tab.chars).into(), None, cx))
                     .child(sep())
@@ -478,7 +657,7 @@ impl NoteyApp {
                             Some(Menu::Language),
                             cx,
                         )
-                        .children(self.menu_popup(Menu::Language, false, cx)),
+                        .children(language_popup),
                     )
                     .child(sep())
                     .child(
@@ -506,5 +685,139 @@ impl NoteyApp {
             .text_color(p.text_weak)
             .child(left)
             .child(right)
+    }
+}
+
+impl NoteyApp {
+    /// The gear icon that opens the Settings tab.
+    pub(super) fn gear_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = self.palette;
+        div()
+            .id("gear")
+            .size(px(24.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.))
+            .font_family(self.icon_font.clone())
+            .text_size(px(13.))
+            .text_color(if self.settings_active { p.text } else { p.text_weak })
+            .hover(|s| s.bg(p.tab_hover))
+            .child("\u{E713}")
+            .tooltip(crate::prompt::tooltip("Settings (Ctrl+,)"))
+            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
+    }
+
+    /// The tabs as a vertical list on the left (Settings > Appearance > Tabs).
+    pub(super) fn left_tab_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = self.palette;
+        let entry = |id: gpui::ElementId, group: SharedString, title: SharedString, modified: bool, active: bool, gear: bool| {
+            div()
+                .id(id)
+                .group(group.clone())
+                .h(px(26.))
+                .pl_2()
+                .pr_1()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .rounded(px(4.))
+                .when(active, |d| d.bg(p.control_active))
+                .when(!active, |d| d.text_color(p.text_weak).hover(|s| s.bg(p.tab_hover)))
+                .when(gear, |d| d.child(div().font_family(self.icon_font.clone()).text_size(px(11.)).child("\u{E713}")))
+                .when(modified, |d| d.child(div().flex_none().text_color(p.accent).child("●")))
+                .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(title))
+        };
+        let mut list = div().id("tab-list").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_0p5();
+        for (i, tab) in self.tabs.iter().enumerate() {
+            let group: SharedString = format!("left-tab-{i}").into();
+            let active = !self.settings_active && i == self.active;
+            let close = self.tab_close(("left-close", i), cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.request_close_tab(i, window, cx)
+            }));
+            list = list.child(
+                entry(("left-tab", i).into(), group.clone(), tab.doc.title().into(), tab.modified, active, false)
+                    .child(div().when(!active, |d| d.invisible().group_hover(group, |s| s.visible())).child(close))
+                    .on_click(cx.listener(move |this, _, window, cx| this.activate(i, window, cx)))
+                    .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| this.request_close_tab(i, window, cx))),
+            );
+        }
+        if self.settings_open {
+            let close = self.tab_close("left-settings-close", cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.close_settings(window, cx)
+            }));
+            list = list.child(
+                entry("left-settings".into(), "left-settings".into(), "Settings".into(), false, self.settings_active, true)
+                    .child(close)
+                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
+            );
+        }
+        let new_tab = div()
+            .id("left-new-tab")
+            .size(px(22.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.))
+            .font_family(self.icon_font.clone())
+            .text_size(px(11.))
+            .hover(|s| s.bg(p.tab_hover))
+            .child("\u{E710}")
+            .tooltip(crate::prompt::tooltip("New tab (Ctrl+N)"))
+            .on_click(cx.listener(|this, _, window, cx| this.new_tab(window, cx)));
+        // Dragging the right edge resizes the list.
+        let handle = div()
+            .id("tab-list-resize")
+            .absolute()
+            .top_0()
+            .right_0()
+            .w(px(5.))
+            .h_full()
+            .cursor(gpui::CursorStyle::ResizeLeftRight)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                this.resizing_tab_list = true;
+                cx.stop_propagation();
+            }));
+        div()
+            .relative()
+            .w(px(self.settings.tabs_left_width))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .p_1p5()
+            .bg(p.chrome)
+            .border_r_1()
+            .border_color(p.stroke)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .pl_1()
+                    .child(div().text_size(px(11.)).text_color(p.text_weak).child("OPEN TABS"))
+                    .child(new_tab),
+            )
+            .child(list)
+            .child(self.gear_button(cx))
+            .child(handle)
+    }
+
+    /// Follow the pointer while the tab list is being resized.
+    pub(super) fn resize_tab_list(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        if self.resizing_tab_list {
+            self.settings.tabs_left_width = f32::from(x).clamp(120.0, 480.0);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn end_tab_list_resize(&mut self) {
+        if std::mem::take(&mut self.resizing_tab_list) {
+            self.settings.save();
+        }
     }
 }

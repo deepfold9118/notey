@@ -219,7 +219,7 @@ impl NoteyApp {
                     .items_center()
                     .gap_1p5()
                     .child(label("Find"))
-                    .child(self.field("fif-pattern", &fif.pattern, cx))
+                    .child(self.hinted_field("fif-pattern", &fif.pattern, "Text to find", cx))
                     .child(option("fif-case", "Aa", fif.match_case, |f| f.match_case = !f.match_case))
                     .child(option("fif-regex", ".*", fif.regex, |f| f.regex = !f.regex))
                     .child(
@@ -252,7 +252,7 @@ impl NoteyApp {
                             .on_click(cx.listener(|this, _, window, cx| this.browse_folder(window, cx))),
                     )
                     .child(label("Files"))
-                    .child(div().w(px(160.)).flex_none().flex().child(self.field("fif-filter", &fif.filter, cx))),
+                    .child(div().w(px(160.)).flex_none().flex().child(self.hinted_field("fif-filter", &fif.filter, "*.rs;*.toml (empty = all)", cx))),
             );
         let summary: SharedString = if let Some(e) = &fif.error {
             e.clone()

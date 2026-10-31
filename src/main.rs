@@ -4,10 +4,12 @@ mod app;
 mod doc;
 mod highlight;
 mod ipc;
+mod markdown;
 // Carried over from the egui version; the plugin manager that uses the
 // rest (install, update, enable) is not ported yet.
 #[allow(dead_code)]
 mod packages;
+mod plugins;
 mod prompt;
 mod search;
 mod session;
@@ -15,8 +17,11 @@ mod settings;
 mod shutdown;
 mod spell;
 mod spellcheck;
+mod styles;
 mod syntax;
 mod theme;
+mod theme_import;
+mod theme_marketplace;
 
 use std::path::PathBuf;
 
@@ -70,7 +75,6 @@ fn main() {
     Application::new().run(move |cx: &mut App| {
         app::init(cx);
         prompt::init(cx);
-        prompt::set_dark(settings::Settings::load().dark);
         let options = WindowOptions {
             window_bounds: Some(app::initial_bounds(&settings::Settings::load(), cx)),
             // The title bar is Notey's own, with the tabs in it.

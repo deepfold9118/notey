@@ -45,6 +45,8 @@ pub struct Settings {
     pub ligatures: bool,
     /// Show the tabs as a vertical list on the left, not in the title bar.
     pub tabs_left: bool,
+    /// The width of the tab list on the left.
+    pub tabs_left_width: f32,
     /// The imported VS Code or TextMate theme in use, if any.
     pub theme_path: Option<PathBuf>,
     /// Save modified files every `autosave_secs` seconds.
@@ -81,6 +83,7 @@ impl Default for Settings {
             zoom: 100.0,
             ligatures: true,
             tabs_left: false,
+            tabs_left_width: 200.0,
             theme_path: None,
             autosave: false,
             autosave_secs: 30.0,

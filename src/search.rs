@@ -2,7 +2,8 @@
 //! on fancy-regex (backreferences and look-around, the Boost.Regex-class
 //! features Notepad++ users expect), with literal mode funneled through the
 //! same path via escaping so case folding is uniform. Carried over from the
-//! egui version; its single-document search is now codemirror-search.
+//! egui version; the editor's own search is now codemirror-search, and the
+//! single-text functions below serve the plugin API.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +30,116 @@ pub fn compile(pattern: &str, opts: SearchOpts) -> Result<Regex, String> {
     }
     Regex::new(&src).map_err(|e| e.to_string().lines().next().unwrap_or("invalid pattern").to_string())
 }
+
+// ---------- single-text search, for the plugin API (char offsets) ----------
+
+/// All match ranges as char offsets, capped at `cap`.
+pub fn find_all(text: &str, re: &Regex, cap: usize) -> Vec<(usize, usize)> {
+    let mut byte_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0usize;
+    while start <= text.len() {
+        match re.find_from_pos(text, start) {
+            Ok(Some(m)) => {
+                byte_ranges.push((m.start(), m.end()));
+                if byte_ranges.len() >= cap {
+                    break;
+                }
+                // avoid infinite loops on empty matches
+                start = if m.end() > m.start() {
+                    m.end()
+                } else {
+                    next_char_boundary(text, m.end())
+                };
+            }
+            _ => break,
+        }
+    }
+    bytes_to_chars(text, &byte_ranges)
+}
+
+fn next_char_boundary(text: &str, b: usize) -> usize {
+    let mut b = b + 1;
+    while b < text.len() && !text.is_char_boundary(b) {
+        b += 1;
+    }
+    b
+}
+
+/// Convert byte ranges (sorted ascending) to char ranges in one pass.
+fn bytes_to_chars(text: &str, byte_ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(byte_ranges.len());
+    let mut flat: Vec<usize> = Vec::with_capacity(byte_ranges.len() * 2);
+    for &(a, b) in byte_ranges {
+        flat.push(a);
+        flat.push(b);
+    }
+    let mut fi = 0usize;
+    let mut chars = 0usize;
+    for (bidx, _) in text.char_indices() {
+        while fi < flat.len() && flat[fi] == bidx {
+            flat[fi] = chars;
+            fi += 1;
+        }
+        chars += 1;
+    }
+    while fi < flat.len() {
+        flat[fi] = chars; // ranges ending at text.len()
+        fi += 1;
+    }
+    for pair in flat.chunks(2) {
+        out.push((pair[0], pair[1]));
+    }
+    out
+}
+
+/// Next match as a char range, searching forward (or backward) from
+/// `from_char`, optionally wrapping.
+pub fn find_next(
+    text: &str,
+    re: &Regex,
+    from_char: usize,
+    backwards: bool,
+    wrap: bool,
+) -> Option<(usize, usize)> {
+    let all = find_all(text, re, 100_000);
+    if all.is_empty() {
+        return None;
+    }
+    if backwards {
+        all.iter()
+            .rev()
+            .find(|&&(_, e)| e <= from_char)
+            .or(if wrap { all.last() } else { None })
+            .copied()
+    } else {
+        all.iter()
+            .find(|&&(s, _)| s >= from_char)
+            .or(if wrap { all.first() } else { None })
+            .copied()
+    }
+}
+
+/// Replace every match. In regex mode `$1`/`${name}` expand; in literal
+/// mode the replacement is taken verbatim. Returns (new_text, count).
+pub fn replace_all(
+    text: &str,
+    re: &Regex,
+    replacement: &str,
+    regex_mode: bool,
+) -> (String, usize) {
+    let count = find_all(text, re, usize::MAX).len();
+    if count == 0 {
+        return (text.to_string(), 0);
+    }
+    let new = if regex_mode {
+        re.replace_all(text, replacement).into_owned()
+    } else {
+        re.replace_all(text, fancy_regex::NoExpand(replacement))
+            .into_owned()
+    };
+    (new, count)
+}
+
 
 /// A matching line.
 #[derive(Clone, Debug)]

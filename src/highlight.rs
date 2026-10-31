@@ -4,7 +4,7 @@
 //! new value (another language, the light or dark theme, a rebuilt grammar
 //! set) starts the cache over.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use codemirror_state::{EditorState, Extension, Facet, FacetSpec};
 use codemirror_view::{
@@ -12,9 +12,10 @@ use codemirror_view::{
 };
 
 use crate::syntax::HlCache;
+use syntect::highlighting::Theme;
 
 /// What an editor highlights with.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SyntaxSpec {
     /// The syntect grammar name, such as "Rust".
     pub name: String,
@@ -22,6 +23,21 @@ pub struct SyntaxSpec {
     /// [`crate::syntax::generation`] when the spec was made, so editors
     /// notice a rebuilt grammar set.
     pub generation: u64,
+    /// An imported theme's token colors; none uses Notey's.
+    pub theme: Option<Arc<Theme>>,
+}
+
+impl PartialEq for SyntaxSpec {
+    fn eq(&self, other: &SyntaxSpec) -> bool {
+        self.name == other.name
+            && self.dark == other.dark
+            && self.generation == other.generation
+            && match (&self.theme, &other.theme) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+    }
 }
 
 /// The grammar of an editor; none means plain text.
@@ -53,7 +69,7 @@ impl Highlighter {
         let (Some(spec), Some(cache)) = (&self.spec, &mut self.cache) else { return Decoration::none() };
         let doc = state.doc();
         let (first, last) = (doc.line_at(viewport.from).number, doc.line_at(viewport.to).number);
-        cache.ensure(last, doc.lines(), spec.dark, None, |i| format!("{}\n", doc.line(i + 1).text));
+        cache.ensure(last, doc.lines(), spec.dark, spec.theme.as_deref(), |i| format!("{}\n", doc.line(i + 1).text));
         let mut ranges = Vec::new();
         let mut marks: Vec<(gpui::Hsla, Decoration)> = Vec::new();
         for n in first..=last {

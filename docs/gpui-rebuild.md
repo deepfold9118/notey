@@ -27,6 +27,12 @@ Build: `cargo build` needs `codemirror-rs` next to this repository
 | `src/syntax.rs` | Carried over: the syntect grammar set, language detection and the per-line parse cache |
 | `src/spellcheck.rs` | The view plugin that underlines misspelled words in the visible lines |
 | `src/spell.rs`, `src/packages.rs` | Carried over: the Hunspell checker (spellbook), and the plugin store that finds the installed Spellcheck and Language plugins |
+| `src/app/themes.rs` | Notey Dark and Light, importing a theme file, and vscodethemes.com downloads |
+| `src/app/plugins_ui.rs` | Settings > Plugins: install, update, turn on or off and remove plugins |
+| `src/app/scripting.rs` | Running Rhai scripts: commands, shortcuts, key hooks, events, results |
+| `src/app/preview.rs`, `src/markdown.rs` | The Markdown preview (rendered or side by side), drawn from pulldown-cmark |
+| `src/styles.rs` | Plugin text colors (Text Color), a state field drawn as marks |
+| `src/plugins.rs`, `src/theme_import.rs`, `src/theme_marketplace.rs` | Carried over: the Rhai plugin host and API 3, the VS Code/TextMate theme loader, and the Marketplace download |
 | `src/settings.rs` | Settings as `settings.json`; imports the egui version's `app.ron` once |
 | `src/theme.rs` | Fluent palettes and the editor theme made from them |
 | `src/doc.rs`, `src/session.rs`, `src/ipc.rs` | Carried over from `main` (doc.rs now keeps only the saved text; the editor state holds the live text) |
@@ -54,8 +60,33 @@ Notey.
 - Single-instance forwarding over the named pipe.
 - Status bar: line and column, characters, zoom, line endings and encoding
   pickers, flash messages.
-- Settings tab: theme, menu bar, status bar, word wrap, line numbers, font
-  size, line height, tab size.
+- Settings tab with its sections (Editor, Appearance, Spellcheck, Plugins)
+  and Reset to defaults: a font picker with a filter, font size, line
+  height, tab size, word wrap, line numbers, ligatures, autosave; the theme,
+  tabs at the top or on the left, menu bar, status bar; spellcheck, its
+  languages and the personal word list.
+- Themes: Notey Dark and Light, VS Code (JSON/JSONC) and TextMate theme
+  files, and themes downloaded from a vscodethemes.com URL, across the whole
+  window and the syntax colors.
+- Tabs on the left: a vertical list with the new-tab button and the gear.
+- Plugins: Settings > Plugins installs, updates, turns on or off and removes
+  plugins from the registry (Features, Languages, File Types), and reloads
+  what a change affects. The status bar offers the File Type plugin for a
+  file it can't highlight.
+- Rhai scripts (plugin API 3, `docs/plugin-api.md`): commands in the Edit
+  menu (groups as submenus, color swatches) and in the right-click menu,
+  shortcuts, key hooks (`on_key`, with the egui version's key names), the
+  events (`ready`, `buffer_opened`, `buffer_activated`, `before_save`,
+  `after_save`, `input`, `text_changed`, `selection_changed`), status bar
+  items with tooltips, and the host actions. The official Features work:
+  Word Count, Autocorrect, Markdown Tools (shortcuts, list continuation,
+  preview), Text Color, Spellcheck.
+- Markdown preview: rendered in place of the editor, or side by side.
+- Text Color: plugin colors that move with edits and win over syntax colors.
+- Tooltips on the status bar items, the gear, the new-tab buttons and plugin
+  commands (the script behind them).
+- The language picker has a filter field and a link to More file types;
+  the tab list on the left can be resized by its right edge.
 - Find and Replace on codemirror-search: a bar over the top right of the
   editor (Ctrl+F, Ctrl+H, F3, Shift+F3, Escape) with match case, whole word
   and regular expressions (look-around, backreferences, `$1` in the
@@ -86,24 +117,12 @@ Notey.
 - Windows shutdown and installer upgrades save the session (`shutdown.rs`
   sends `WM_CLOSE` to GPUI on `WM_ENDSESSION`).
 - Dialogs are drawn in the window in the Fluent style.
-- Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W,
+- Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+P, Ctrl+W,
   Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,, Ctrl+F,
   Ctrl+H, F3, Shift+F3 and Ctrl+G. In the editor, Ctrl+D selects the next
   occurrence of the selection and Ctrl+Shift+L all of them.
 
-## To port from `main`
+## Not ported
 
-Get an old module with `git show main:src/<file>`.
-
-- The status bar's "Install … highlighting" offer for files with no File
-  Type plugin, and a filter field in the language picker (both need the
-  plugin manager or a text field in menus).
-- Plugins: Settings > Plugins to install, update, turn on or off and remove
-  plugins (`plugin_manager.rs`; `packages.rs` is already here, and its
-  install code is unused until then), Rhai scripts and their commands in
-  the menus and the right-click menu (`plugins.rs`, `docs/plugin-api.md`),
-  Markdown preview, Text Color.
-- Themes: imported VS Code and TextMate themes and the theme marketplace
-  (`theme.rs`, `theme_marketplace.rs`).
-- Settings still missing: editor font picker, ligatures, tabs on the left,
-  the spellcheck language list and personal word list, plugins.
+- Accessibility: egui exposed the window to screen readers through
+  AccessKit (`NOTEY_ACCESSKIT`). GPUI 0.2 has no accessibility tree.

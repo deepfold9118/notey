@@ -86,6 +86,7 @@ pub fn editor_theme(p: &Palette, settings: &Settings) -> codemirror_view::Theme 
     unfocused.a = 0.6;
     codemirror_view::Theme {
         font_family: settings.editor_font.clone().into(),
+        font_features: if settings.ligatures { gpui::FontFeatures::default() } else { gpui::FontFeatures::disable_ligatures() },
         font_size: settings.zoomed_font_size(),
         line_height: 1.4 * settings.line_height,
         text: p.text,

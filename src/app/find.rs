@@ -374,6 +374,14 @@ impl NoteyApp {
                 this.open_find_in_files(window, cx)
             }))
             .on_action(cx.listener(|this, _: &FieldEnter, window, cx| {
+                if this.languages.filter.read(cx).has_focus() {
+                    this.pick_first_language(window, cx);
+                    return;
+                }
+                if this.theme_ui.url_focused(cx) {
+                    this.start_theme_url_import(cx);
+                    return;
+                }
                 if this.fif.focused(cx) {
                     this.start_find_in_files(cx);
                     return;
@@ -392,6 +400,10 @@ impl NoteyApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &FieldEscape, window, cx| {
+                if this.languages.filter.read(cx).has_focus() {
+                    this.close_language_picker(window, cx);
+                    return;
+                }
                 if this.fif.focused(cx) {
                     this.close_find_in_files(window, cx);
                     return;
@@ -415,11 +427,12 @@ impl NoteyApp {
             }))
     }
 
-    pub(super) fn field(&self, id: &'static str, view: &Entity<EditorView>, cx: &App) -> impl IntoElement {
+    pub(super) fn field(&self, id: &'static str, view: &Entity<EditorView>, cx: &App) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
         let focused = view.read(cx).has_focus();
         div()
             .id(id)
+            .relative()
             .key_context(FIELD_CONTEXT)
             .flex_1()
             .min_w_0()
@@ -430,6 +443,32 @@ impl NoteyApp {
             .when(focused, |d| d.border_b_2().border_color(p.accent))
             .overflow_hidden()
             .child(view.clone())
+    }
+
+    /// A field that shows `hint` while it is empty.
+    pub(super) fn hinted_field(
+        &self,
+        id: &'static str,
+        view: &Entity<EditorView>,
+        hint: &'static str,
+        cx: &App,
+    ) -> gpui::Stateful<gpui::Div> {
+        let empty = view.read(cx).state().doc().is_empty();
+        let p = self.palette;
+        self.field(id, view, cx).when(empty, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(px(7.))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .text_size(px(13.))
+                    .text_color(p.text_weak)
+                    .child(hint),
+            )
+        })
     }
 
     pub(super) fn icon_button(&self, id: &'static str, glyph: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
@@ -531,7 +570,7 @@ impl NoteyApp {
                 this.find.show_replace = !this.find.show_replace;
                 cx.notify();
             })))
-            .child(self.field("find-field", &self.find.find, cx))
+            .child(self.hinted_field("find-field", &self.find.find, "Find", cx))
             .child(div().flex_none().min_w(px(64.)).px_1().text_size(px(12.)).text_color(p.text_weak).child(count))
             .child(option(self, "opt-case", "Aa", query.case_sensitive, QueryOption::Case, cx))
             .child(option(self, "opt-word", "W", query.whole_word, QueryOption::Word, cx))
@@ -551,7 +590,7 @@ impl NoteyApp {
                     .items_center()
                     .gap_1()
                     .child(div().w(px(28.)).flex_none())
-                    .child(self.field("replace-field", &self.find.replace, cx))
+                    .child(self.hinted_field("replace-field", &self.find.replace, "Replace", cx))
                     .child(self.text_button("replace-one", "Replace").on_click(cx.listener(|this, _, _, cx| this.replace_step(false, cx))))
                     .child(self.text_button("replace-all", "Replace all").on_click(cx.listener(|this, _, _, cx| this.replace_step(true, cx)))),
             );
@@ -559,7 +598,7 @@ impl NoteyApp {
         Some(bar.into_any_element())
     }
 
-    pub(super) fn text_button(&self, id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn text_button(&self, id: impl Into<gpui::ElementId>, label: &'static str) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
         div()
             .id(id)
