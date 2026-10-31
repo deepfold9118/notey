@@ -938,13 +938,25 @@ impl Render for NoteyApp {
         let submenu = self.submenu_popup(cx);
         self.update_accessibility(window, cx);
         let status = self.settings.show_status.then(|| self.status_bar(window, cx).into_any_element());
+        // The window's focus is tracked below the title bar only: an element
+        // that tracks focus handles every mouse down inside it, and GPUI then
+        // keeps a mouse down on the title bar from moving the window.
+        let content = div()
+            .track_focus(&self.focus_handle)
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .when(self.settings.show_menu, |d| d.child(self.menu_bar(cx)))
+            .child(div().h(px(1.)).flex_none().bg(p.stroke))
+            .child(main)
+            .children(status);
         let root = div()
             .id("notey")
             .key_context("Notey")
             .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.resize_tab_list(e.position.x, cx)))
             .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _, _, _| this.end_tab_list_resize()))
             .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| this.plugin_key(event, window, cx)))
-            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()
@@ -953,10 +965,7 @@ impl Render for NoteyApp {
             .font_family(UI_FONT)
             .text_size(px(13.))
             .child(self.title_bar(window, cx))
-            .when(self.settings.show_menu, |d| d.child(self.menu_bar(cx)))
-            .child(div().h(px(1.)).flex_none().bg(p.stroke))
-            .child(main)
-            .children(status)
+            .child(content)
             .children(submenu);
         let root = self.register_actions(root, cx);
         self.register_find_actions(root, cx)
