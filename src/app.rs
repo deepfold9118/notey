@@ -3,6 +3,7 @@
 //! CodeMirror [`EditorView`]; the editor state holds the text and the
 //! [`Document`] holds the file it belongs to.
 
+mod accessibility;
 mod chrome;
 mod find;
 mod find_in_files;
@@ -179,6 +180,8 @@ pub struct NoteyApp {
     submenu_rows: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<SharedString, gpui::Bounds<gpui::Pixels>>>>,
     /// The window height, for the height of menus.
     viewport_h: f32,
+    /// The accessibility tree, on Windows.
+    a11y: Option<crate::a11y::A11y>,
     status_msg: Option<SharedString>,
     flash_task: Option<Task<()>>,
     /// Owns the single-instance socket and the saved session. Secondary
@@ -204,6 +207,8 @@ impl NoteyApp {
         paths: Vec<PathBuf>,
         is_primary: bool,
         mut inbox: UnboundedReceiver<PathBuf>,
+        a11y: Option<crate::a11y::A11y>,
+        mut a11y_requests: UnboundedReceiver<crate::a11y::Request>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -245,6 +250,7 @@ impl NoteyApp {
             resizing_tab_list: false,
             submenu_rows: Default::default(),
             viewport_h: 720.0,
+            a11y,
             status_msg: None,
             flash_task: None,
             is_primary,
@@ -271,6 +277,14 @@ impl NoteyApp {
             app.new_tab(window, cx);
         }
 
+        // What screen readers ask for.
+        app._tasks.push(cx.spawn_in(window, async move |this, cx| {
+            while let Some(request) = a11y_requests.next().await {
+                if this.update_in(cx, |this, window, cx| this.a11y_request(request, window, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
         // Files that a second `notey.exe` forwards.
         app._tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Some(path) = inbox.next().await {
@@ -447,7 +461,13 @@ impl NoteyApp {
     /// Give the keyboard focus to the visible editor, or to the window
     /// when the Settings tab is visible.
     fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings_active {
+        // The rendered Markdown view hides the editor; focus on a hidden
+        // element would leave the keys nowhere to go.
+        let rendered = self
+            .tabs
+            .get(self.active)
+            .is_some_and(|t| self.previews.get(&t.doc.id) == Some(&preview::Preview::Rendered));
+        if self.settings_active || rendered {
             window.focus(&self.focus_handle);
         } else if let Some(tab) = self.tabs.get(self.active) {
             tab.view.read(cx).focus(window);
@@ -916,6 +936,7 @@ impl Render for NoteyApp {
         };
         self.viewport_h = f32::from(window.viewport_size().height);
         let submenu = self.submenu_popup(cx);
+        self.update_accessibility(window, cx);
         let status = self.settings.show_status.then(|| self.status_bar(window, cx).into_any_element());
         let root = div()
             .id("notey")

@@ -160,7 +160,7 @@ impl NoteyApp {
         cx.notify();
     }
 
-    fn set_plugin_enabled(&mut self, id: &str, on: bool, cx: &mut Context<Self>) {
+    pub(super) fn set_plugin_enabled(&mut self, id: &str, on: bool, cx: &mut Context<Self>) {
         self.plugins.store.set_enabled(id, on);
         if let Some(kind) = self.plugins.store.get(id).map(|p| p.manifest.kind) {
             self.reload_plugin_kind(kind, cx);

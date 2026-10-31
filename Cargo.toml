@@ -22,6 +22,7 @@ raw-window-handle = "0.6"
 ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+accesskit = "0.24"
 rhai = "1"
 arboard = "3"
 rfd = "0.17"
@@ -34,6 +35,9 @@ sha2 = "0.10"
 spellbook = "0.4"
 syntect = { version = "5", default-features = false, features = ["parsing", "default-themes", "plist-load", "yaml-load", "dump-load", "dump-create", "regex-fancy"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+accesskit_windows = "0.32"
 
 [build-dependencies]
 winresource = "0.1"

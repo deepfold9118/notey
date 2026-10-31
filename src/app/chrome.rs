@@ -68,7 +68,7 @@ pub(super) fn action(label: &'static str, shortcut: &'static str, action: impl A
 }
 
 impl NoteyApp {
-    fn menu_items(&self, menu: Menu) -> Vec<Item> {
+    pub(super) fn menu_items(&self, menu: Menu) -> Vec<Item> {
         match menu {
             Menu::File => {
                 let mut items = vec![
@@ -842,5 +842,31 @@ impl NoteyApp {
                 .with_priority(3)
                 .into_any_element(),
         )
+    }
+}
+
+impl NoteyApp {
+    /// Do what clicking a menu item does (for screen readers).
+    pub(super) fn run_menu_item(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
+        match item {
+            Item::Action { action, .. } => {
+                self.open_menu = None;
+                self.focus_active(window, cx);
+                window.dispatch_action(action, cx);
+            }
+            Item::Choice { choose, .. } => {
+                self.open_menu = None;
+                choose(self, window, cx);
+                self.focus_active(window, cx);
+            }
+            Item::Plugin { script, cmd, enabled: true, .. } => {
+                self.open_menu = None;
+                self.focus_active(window, cx);
+                self.run_plugin_command(script, &cmd, window, cx);
+            }
+            Item::Submenu { label, .. } => self.open_submenu = Some(label),
+            _ => {}
+        }
+        cx.notify();
     }
 }

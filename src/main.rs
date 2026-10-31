@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod a11y;
 mod app;
 mod doc;
 mod highlight;
@@ -81,17 +82,22 @@ fn main() {
             titlebar: Some(TitlebarOptions { title: Some("Notey".into()), appears_transparent: true, ..Default::default() }),
             window_min_size: Some(size(px(480.), px(320.))),
             app_id: Some("Notey".into()),
+            // Shown below, once the accessibility adapter is attached (it must
+            // be before the window is first shown).
+            show: false,
             ..Default::default()
         };
         let (inbox, received) = futures::channel::mpsc::unbounded();
-        cx.open_window(options, move |window, cx| {
+        let handle = cx.open_window(options, move |window, cx| {
             // The first instance owns the socket; later windows run standalone.
             let hwnd = main_hwnd(window);
+            let (a11y, a11y_requests) = a11y::install(hwnd);
             shutdown::install(hwnd);
             let is_primary = ipc::start_listener(inbox, hwnd);
-            cx.new(|cx| app::NoteyApp::new(paths, is_primary, received, window, cx))
+            cx.new(|cx| app::NoteyApp::new(paths, is_primary, received, a11y, a11y_requests, window, cx))
         })
         .expect("open the Notey window");
+        let _ = handle.update(cx, |_, window, _| window.activate_window());
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

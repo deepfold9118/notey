@@ -18,7 +18,7 @@ pub(super) enum Section {
 impl Section {
     const ALL: [Section; 4] = [Section::Editor, Section::Appearance, Section::Spellcheck, Section::Plugins];
 
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Section::Editor => "Editor",
             Section::Appearance => "Appearance",

@@ -28,6 +28,7 @@ impl NoteyApp {
         match mode {
             "rendered" => {
                 self.previews.insert(id, Preview::Rendered);
+                self.focus_active(window, cx);
             }
             "split" => {
                 self.previews.insert(id, Preview::Split);

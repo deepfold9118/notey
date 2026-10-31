@@ -18,6 +18,7 @@ Build: `cargo build` needs `codemirror-rs` next to this repository
 | `src/app/find.rs` | The find and replace bar and the Go To bar |
 | `src/app/find_in_files.rs` | The Find in Files panel |
 | `src/app/watch.rs` | File watching and reload, autosave, window geometry |
+| `src/a11y.rs`, `src/app/accessibility.rs` | The screen reader (UI Automation) tree and its actions |
 | `src/prompt.rs` | In-window Fluent dialogs for `window.prompt` |
 | `src/search.rs`, `src/shutdown.rs` | Carried over: the folder grep, and saving at Windows shutdown |
 | `src/app/settings_tab.rs` | The Settings tab |
@@ -117,12 +118,17 @@ Notey.
 - Windows shutdown and installer upgrades save the session (`shutdown.rs`
   sends `WM_CLOSE` to GPUI on `WM_ENDSESSION`).
 - Dialogs are drawn in the window in the Fluent style.
+- Screen readers: GPUI 0.2 has no accessibility support, so Notey builds
+  its own AccessKit tree (`a11y.rs`, `app/accessibility.rs`) and serves it
+  through UI Automation by subclassing the window (the window opens hidden
+  until the adapter is attached). It has the tabs, caption buttons, menus
+  and their items, the editor as a multiline text input (text, a run per
+  line, the selection), the find bar, the status bar, the Settings
+  sections with checkboxes and spin buttons, and dialogs; screen readers
+  can click, focus, select text and step values. The egui version's
+  `NOTEY_ACCESSKIT` switch is not needed: the tree starts when a screen
+  reader first asks.
 - Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+P, Ctrl+W,
   Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,, Ctrl+F,
   Ctrl+H, F3, Shift+F3 and Ctrl+G. In the editor, Ctrl+D selects the next
   occurrence of the selection and Ctrl+Shift+L all of them.
-
-## Not ported
-
-- Accessibility: egui exposed the window to screen readers through
-  AccessKit (`NOTEY_ACCESSKIT`). GPUI 0.2 has no accessibility tree.

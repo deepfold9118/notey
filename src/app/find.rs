@@ -44,8 +44,8 @@ enum QueryOption {
 }
 
 pub(super) struct FindBar {
-    find: Entity<EditorView>,
-    replace: Entity<EditorView>,
+    pub(super) find: Entity<EditorView>,
+    pub(super) replace: Entity<EditorView>,
     goto: Entity<EditorView>,
     show_replace: bool,
     goto_open: bool,
@@ -205,7 +205,7 @@ impl NoteyApp {
         self.run_on_active(if forward { find_next } else { find_previous }, cx);
     }
 
-    fn replace_step(&mut self, all: bool, cx: &mut Context<Self>) {
+    pub(super) fn replace_step(&mut self, all: bool, cx: &mut Context<Self>) {
         self.commit_query(cx);
         self.run_on_active(if all { replace_all } else { replace_next }, cx);
     }

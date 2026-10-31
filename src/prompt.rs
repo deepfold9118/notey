@@ -13,6 +13,25 @@ use crate::theme::{palette, Palette};
 
 static PALETTE: Mutex<Option<Palette>> = Mutex::new(None);
 
+thread_local! {
+    /// The open prompt, for the accessibility tree.
+    static CURRENT: std::cell::RefCell<Option<gpui::WeakEntity<FluentPrompt>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The open prompt: its message, detail and buttons.
+pub fn current(cx: &App) -> Option<(SharedString, Option<SharedString>, Vec<SharedString>)> {
+    let view = CURRENT.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade()))?;
+    let p = view.read(cx);
+    Some((p.message.clone(), p.detail.clone(), p.actions.clone()))
+}
+
+/// Answer the open prompt with button `i`, as a click would.
+pub fn answer(i: usize, cx: &mut App) {
+    if let Some(view) = CURRENT.with(|c| c.borrow().as_ref().and_then(|w| w.upgrade())) {
+        view.update(cx, |_, cx| cx.emit(PromptResponse(i)));
+    }
+}
+
 /// Follow the theme.
 pub fn set_palette(p: Palette) {
     *PALETTE.lock().unwrap() = Some(p);
@@ -40,6 +59,8 @@ fn build(
     });
     // The prompt draws with the window, which must draw again to show it.
     window.refresh();
+    let weak = view.downgrade();
+    CURRENT.with(|c| *c.borrow_mut() = Some(weak));
     handle.with_view(view, window, cx)
 }
 
