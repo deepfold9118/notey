@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use gpui::{
-    anchored, deferred, div, img, prelude::*, px, relative, Action, AnyElement, Context, Corner, Image, ImageFormat,
+    anchored, canvas, deferred, div, img, prelude::*, px, relative, Action, AnyElement, Context, Corner, Image, ImageFormat,
     MouseButton, MouseDownEvent, Pixels, Point, SharedString, Window, WindowControlArea,
 };
 
@@ -239,8 +239,10 @@ impl NoteyApp {
     pub(super) fn menu_panel(&self, menu: Menu, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         self.item_list("menu", self.menu_items(menu), cx)
-            // The language picker has a line per installed file type.
-            .when(menu == Menu::Language, |d| d.max_h(px(440.)).overflow_y_scroll())
+            // Menus scroll when taller than the window; submenus are drawn
+            // outside them (`submenu_popup`).
+            .max_h(px(self.viewport_h - 16.))
+            .overflow_y_scroll()
             .on_mouse_down_out(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                 if !this.in_menu_trigger(ev.position, window) && !this.submenu_hovered {
                     this.open_menu = None;
@@ -294,39 +296,30 @@ impl NoteyApp {
                         }))
                     })
                     .into_any_element(),
-                Item::Submenu { label, items } => {
+                Item::Submenu { label, items: _ } => {
                     let open = self.open_submenu.as_ref() == Some(&label);
                     let hover_label = label.clone();
-                    let mut row = row()
+                    // The row's bounds, where `submenu_popup` puts the submenu.
+                    let rows = self.submenu_rows.clone();
+                    let bounds_label = label.clone();
+                    row()
                         .relative()
                         .justify_between()
                         .when(open, |d| d.bg(p.control_hover))
                         .child(label.clone())
                         .child(div().font_family(self.icon_font.clone()).text_size(px(9.)).child("\u{E76C}"))
+                        .child(
+                            canvas(move |bounds, _, _| rows.borrow_mut().insert(bounds_label, bounds), |_, _, _, _| {})
+                                .absolute()
+                                .size_full(),
+                        )
                         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                             if *hovered && this.open_submenu.as_ref() != Some(&hover_label) {
                                 this.open_submenu = Some(hover_label.clone());
                                 cx.notify();
                             }
-                        }));
-                    if open {
-                        let panel = self
-                            .item_list("submenu", items, cx)
-                            .bg(p.popup)
-                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                                this.submenu_hovered = *hovered;
-                                cx.notify();
-                            }));
-                        // Not deferred: the menu itself is, and GPUI does not nest them.
-                        row = row.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left(relative(1.))
-                                .child(anchored().snap_to_window_with_margin(px(8.)).child(panel)),
-                        );
-                    }
-                    row.into_any_element()
+                        }))
+                        .into_any_element()
                 }
                 Item::Action { label, shortcut, action } => row()
                     .justify_between()
@@ -819,5 +812,35 @@ impl NoteyApp {
         if std::mem::take(&mut self.resizing_tab_list) {
             self.settings.save();
         }
+    }
+}
+
+impl NoteyApp {
+    /// The open submenu, beside its row in the open menu. It is drawn at the
+    /// window level, outside the menu, which may scroll.
+    pub(super) fn submenu_popup(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.open_menu?;
+        let label = self.open_submenu.clone()?;
+        let row = *self.submenu_rows.borrow().get(&label)?;
+        let items = self.menu_items(menu).into_iter().find_map(|item| match item {
+            Item::Submenu { label: l, items } if l == label => Some(items),
+            _ => None,
+        })?;
+        let p = self.palette;
+        let panel = self
+            .item_list("submenu", items, cx)
+            .bg(p.popup)
+            .max_h(px(self.viewport_h - 16.))
+            .overflow_y_scroll()
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.submenu_hovered = *hovered;
+                cx.notify();
+            }));
+        let at = gpui::point(row.right(), row.top() - px(5.));
+        Some(
+            deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(panel))
+                .with_priority(3)
+                .into_any_element(),
+        )
     }
 }

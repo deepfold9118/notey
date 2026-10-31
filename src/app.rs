@@ -175,6 +175,10 @@ pub struct NoteyApp {
     submenu_hovered: bool,
     /// The tab list on the left is being resized.
     resizing_tab_list: bool,
+    /// Where each submenu row of the open menu was drawn.
+    submenu_rows: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<SharedString, gpui::Bounds<gpui::Pixels>>>>,
+    /// The window height, for the height of menus.
+    viewport_h: f32,
     status_msg: Option<SharedString>,
     flash_task: Option<Task<()>>,
     /// Owns the single-instance socket and the saved session. Secondary
@@ -239,6 +243,8 @@ impl NoteyApp {
             open_submenu: None,
             submenu_hovered: false,
             resizing_tab_list: false,
+            submenu_rows: Default::default(),
+            viewport_h: 720.0,
             status_msg: None,
             flash_task: None,
             is_primary,
@@ -908,6 +914,8 @@ impl Render for NoteyApp {
         } else {
             main.into_any_element()
         };
+        self.viewport_h = f32::from(window.viewport_size().height);
+        let submenu = self.submenu_popup(cx);
         let status = self.settings.show_status.then(|| self.status_bar(window, cx).into_any_element());
         let root = div()
             .id("notey")
@@ -927,7 +935,8 @@ impl Render for NoteyApp {
             .when(self.settings.show_menu, |d| d.child(self.menu_bar(cx)))
             .child(div().h(px(1.)).flex_none().bg(p.stroke))
             .child(main)
-            .children(status);
+            .children(status)
+            .children(submenu);
         let root = self.register_actions(root, cx);
         self.register_find_actions(root, cx)
     }
