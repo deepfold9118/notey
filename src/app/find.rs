@@ -27,6 +27,7 @@ pub(super) fn bindings() -> Vec<GpuiKeyBinding> {
         GpuiKeyBinding::new("f3", FindNext, None),
         GpuiKeyBinding::new("shift-f3", FindPrevious, None),
         GpuiKeyBinding::new("ctrl-g", GoTo, None),
+        GpuiKeyBinding::new("ctrl-shift-f", super::find_in_files::FindInFiles, None),
         GpuiKeyBinding::new("enter", FieldEnter, Some(FIELD_CONTEXT)),
         GpuiKeyBinding::new("shift-enter", FieldShiftEnter, Some(FIELD_CONTEXT)),
         GpuiKeyBinding::new("escape", FieldEscape, Some(FIELD_CONTEXT)),
@@ -62,7 +63,7 @@ pub(super) struct FindBar {
     _observers: Vec<Subscription>,
 }
 
-fn field_theme(p: &Palette) -> Theme {
+pub(super) fn field_theme(p: &Palette) -> Theme {
     let mut unfocused = p.selection;
     unfocused.a = 0.5;
     Theme {
@@ -83,12 +84,12 @@ fn field_theme(p: &Palette) -> Theme {
     }
 }
 
-fn field_text(view: &Entity<EditorView>, cx: &App) -> String {
+pub(super) fn field_text(view: &Entity<EditorView>, cx: &App) -> String {
     view.read(cx).state().doc().to_string()
 }
 
 /// Replace a field's text and select it.
-fn set_field_text(view: &Entity<EditorView>, text: &str, cx: &mut App) {
+pub(super) fn set_field_text(view: &Entity<EditorView>, text: &str, cx: &mut App) {
     view.update(cx, |view, cx| {
         let len = view.state().doc().len();
         view.dispatch_spec(
@@ -100,7 +101,7 @@ fn set_field_text(view: &Entity<EditorView>, text: &str, cx: &mut App) {
     });
 }
 
-fn select_field(view: &Entity<EditorView>, window: &mut Window, cx: &mut App) {
+pub(super) fn select_field(view: &Entity<EditorView>, window: &mut Window, cx: &mut App) {
     view.update(cx, |view, cx| {
         let len = view.state().doc().len();
         view.dispatch_spec(TransactionSpec::new().selection(EditorSelection::single(0, len)), cx);
@@ -108,21 +109,24 @@ fn select_field(view: &Entity<EditorView>, window: &mut Window, cx: &mut App) {
     });
 }
 
+/// A one-line text field: a small CodeMirror editor themed by `config`.
+pub(super) fn field_editor(config: &Compartment, p: &Palette, cx: &mut Context<NoteyApp>) -> Entity<EditorView> {
+    let mut bindings = default_keymap();
+    bindings.extend(history_keymap());
+    let extensions = Extension::list([
+        history(HistoryConfig::default()),
+        keymap(bindings),
+        config.of(THEME.of(Arc::new(field_theme(p)))),
+    ]);
+    let state = EditorState::create(EditorStateConfig::new().extensions(extensions));
+    cx.new(|cx| EditorView::new(state, cx))
+}
+
 impl FindBar {
     pub(super) fn new(p: &Palette, cx: &mut Context<NoteyApp>) -> FindBar {
         let config = Compartment::new();
-        let make = |cx: &mut Context<NoteyApp>| {
-            let mut bindings = default_keymap();
-            bindings.extend(history_keymap());
-            let extensions = Extension::list([
-                history(HistoryConfig::default()),
-                keymap(bindings),
-                config.of(THEME.of(Arc::new(field_theme(p)))),
-            ]);
-            let state = EditorState::create(EditorStateConfig::new().extensions(extensions));
-            cx.new(|cx| EditorView::new(state, cx))
-        };
-        let (find, replace, goto) = (make(cx), make(cx), make(cx));
+        let (find, replace, goto) =
+            (field_editor(&config, p, cx), field_editor(&config, p, cx), field_editor(&config, p, cx));
         let observers = vec![
             cx.observe(&find, |this, _, cx| this.field_changed(cx)),
             cx.observe(&replace, |this, _, cx| this.field_changed(cx)),
@@ -366,7 +370,14 @@ impl NoteyApp {
             .on_action(cx.listener(|this, _: &FindNext, _, cx| this.find_step(true, cx)))
             .on_action(cx.listener(|this, _: &FindPrevious, _, cx| this.find_step(false, cx)))
             .on_action(cx.listener(|this, _: &GoTo, window, cx| this.open_goto(window, cx)))
+            .on_action(cx.listener(|this, _: &super::find_in_files::FindInFiles, window, cx| {
+                this.open_find_in_files(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &FieldEnter, window, cx| {
+                if this.fif.focused(cx) {
+                    this.start_find_in_files(cx);
+                    return;
+                }
                 if this.find.goto.read(cx).has_focus() {
                     this.submit_goto(window, cx);
                 } else if this.find.replace.read(cx).has_focus() {
@@ -381,6 +392,10 @@ impl NoteyApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &FieldEscape, window, cx| {
+                if this.fif.focused(cx) {
+                    this.close_find_in_files(window, cx);
+                    return;
+                }
                 if this.find.goto.read(cx).has_focus() {
                     this.close_goto(window, cx);
                 } else {
@@ -388,6 +403,10 @@ impl NoteyApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &FieldTab, window, cx| {
+                if this.fif.focused(cx) {
+                    this.fif.next_field(window, cx);
+                    return;
+                }
                 if !this.find.show_replace {
                     return;
                 }
@@ -396,7 +415,7 @@ impl NoteyApp {
             }))
     }
 
-    fn field(&self, id: &'static str, view: &Entity<EditorView>, cx: &App) -> impl IntoElement {
+    pub(super) fn field(&self, id: &'static str, view: &Entity<EditorView>, cx: &App) -> impl IntoElement {
         let p = self.palette;
         let focused = view.read(cx).has_focus();
         div()
@@ -413,7 +432,7 @@ impl NoteyApp {
             .child(view.clone())
     }
 
-    fn icon_button(&self, id: &'static str, glyph: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn icon_button(&self, id: &'static str, glyph: &'static str, on: bool) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
         div()
             .id(id)
@@ -540,7 +559,7 @@ impl NoteyApp {
         Some(bar.into_any_element())
     }
 
-    fn text_button(&self, id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn text_button(&self, id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
         div()
             .id(id)

@@ -16,6 +16,10 @@ Build: `cargo build` needs `codemirror-rs` next to this repository
 | `src/app.rs` | `NoteyApp`: tabs (one `EditorView` each), files, session, actions and keys |
 | `src/app/chrome.rs` | Title bar with tabs and caption buttons, menu bar and menus, status bar |
 | `src/app/find.rs` | The find and replace bar and the Go To bar |
+| `src/app/find_in_files.rs` | The Find in Files panel |
+| `src/app/watch.rs` | File watching and reload, autosave, window geometry |
+| `src/prompt.rs` | In-window Fluent dialogs for `window.prompt` |
+| `src/search.rs`, `src/shutdown.rs` | Carried over: the folder grep, and saving at Windows shutdown |
 | `src/app/settings_tab.rs` | The Settings tab |
 | `src/app/spelling.rs` | Loading the dictionaries, and the editor's right-click menu with suggestions |
 | `src/app/languages.rs` | Building the grammar set from the File Type plugins, and the language picker |
@@ -72,6 +76,16 @@ Notey.
   status bar's language picker; it is saved in the session. Only the lines
   down to the bottom of the screen are parsed, and an edit re-parses from
   the edited line.
+- Find in Files (Ctrl+Shift+F): a panel below the editor with the pattern,
+  folder (with Browse), file filters, match case and regex; results stream
+  in (up to 2000, .gitignore respected) and open at their line.
+- Print (Ctrl+P) hands the saved file to the Windows print verb, as before.
+- Files changed by another program ask to reload (every 3 s); deleted files
+  are reported. Autosave, with its interval, in Settings > Editor.
+- The window reopens at its last position and size (or maximized).
+- Windows shutdown and installer upgrades save the session (`shutdown.rs`
+  sends `WM_CLOSE` to GPUI on `WM_ENDSESSION`).
+- Dialogs are drawn in the window in the Fluent style.
 - Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W,
   Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,, Ctrl+F,
   Ctrl+H, F3, Shift+F3 and Ctrl+G. In the editor, Ctrl+D selects the next
@@ -81,7 +95,6 @@ Notey.
 
 Get an old module with `git show main:src/<file>`.
 
-- Find in Files (`search.rs` carries over as is).
 - The status bar's "Install … highlighting" offer for files with no File
   Type plugin, and a filter field in the language picker (both need the
   plugin manager or a text field in menus).
@@ -92,10 +105,5 @@ Get an old module with `git show main:src/<file>`.
   Markdown preview, Text Color.
 - Themes: imported VS Code and TextMate themes and the theme marketplace
   (`theme.rs`, `theme_marketplace.rs`).
-- Settings still missing: editor font picker, ligatures, autosave, tabs on
-  the left, the spellcheck language list and personal word list, plugins.
-- File watching and the reload prompt, Print.
-- Session end: `shutdown.rs` handled `WM_ENDSESSION` for winit. Under GPUI
-  the session is saved every 30 s and on close; saving on Windows shutdown
-  still needs a hook.
-- Window size and position memory.
+- Settings still missing: editor font picker, ligatures, tabs on the left,
+  the spellcheck language list and personal word list, plugins.

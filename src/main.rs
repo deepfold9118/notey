@@ -9,6 +9,7 @@ mod ipc;
 #[allow(dead_code)]
 mod packages;
 mod prompt;
+mod search;
 mod session;
 mod settings;
 mod shutdown;

@@ -5,6 +5,7 @@
 
 mod chrome;
 mod find;
+mod find_in_files;
 mod languages;
 mod settings_tab;
 mod spelling;
@@ -58,6 +59,7 @@ actions!(
         ZoomReset,
         InsertTimeDate,
         OpenSettings,
+        Print,
         Exit,
         Undo,
         Redo,
@@ -87,6 +89,7 @@ pub fn init(cx: &mut App) {
         GpuiKeyBinding::new("ctrl-o", Open, None),
         GpuiKeyBinding::new("ctrl-s", Save, None),
         GpuiKeyBinding::new("ctrl-shift-s", SaveAs, None),
+        GpuiKeyBinding::new("ctrl-p", Print, None),
         GpuiKeyBinding::new("ctrl-w", CloseTab, None),
         GpuiKeyBinding::new("ctrl-tab", NextTab, None),
         GpuiKeyBinding::new("ctrl-shift-tab", PrevTab, None),
@@ -152,6 +155,7 @@ pub struct NoteyApp {
     settings_active: bool,
     open_menu: Option<Menu>,
     find: find::FindBar,
+    fif: find_in_files::FifPanel,
     status_msg: Option<SharedString>,
     flash_task: Option<Task<()>>,
     /// Owns the single-instance socket and the saved session. Secondary
@@ -188,6 +192,7 @@ impl NoteyApp {
             "Segoe MDL2 Assets"
         };
         let find = find::FindBar::new(&palette(settings.dark), cx);
+        let fif = find_in_files::FifPanel::new(&palette(settings.dark), cx);
         let mut app = NoteyApp {
             tabs: Vec::new(),
             active: 0,
@@ -200,6 +205,7 @@ impl NoteyApp {
             settings_active: false,
             open_menu: None,
             find,
+            fif,
             status_msg: None,
             flash_task: None,
             is_primary,
@@ -661,6 +667,7 @@ impl NoteyApp {
         self.palette = palette(self.settings.dark);
         crate::prompt::set_dark(self.settings.dark);
         self.find.set_palette(&self.palette, cx);
+        self.fif.set_palette(&self.palette, cx);
         for i in 0..self.tabs.len() {
             self.reconfigure_tab(i, cx);
         }
@@ -673,6 +680,26 @@ impl NoteyApp {
         let tab = &self.tabs[idx];
         let effect = self.config.reconfigure(self.editor_config(tab.doc.language.as_deref()));
         tab.view.update(cx, |view, cx| view.dispatch_spec(TransactionSpec::new().effect(effect), cx));
+    }
+
+    /// Print the saved file with the program Windows associates with it.
+    fn print(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(self.active).filter(|_| !self.settings_active) else { return };
+        let path = match &tab.doc.path {
+            Some(path) if !tab.modified => path.clone(),
+            _ => {
+                self.flash("Save the file before printing".into(), cx);
+                return;
+            }
+        };
+        let quoted = path.display().to_string().replace('\'', "''");
+        let result = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &format!("Start-Process -FilePath '{quoted}' -Verb Print")])
+            .spawn();
+        match result {
+            Ok(_) => self.flash("Sent to the printer".into(), cx),
+            Err(e) => self.flash(format!("Print failed: {e}"), cx),
+        }
     }
 
     fn flash(&mut self, msg: String, cx: &mut Context<Self>) {
@@ -740,6 +767,7 @@ impl NoteyApp {
                 this.with_editor(cx, |view, cx| view.insert_text(&stamp, "input", cx));
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
+            .on_action(cx.listener(|this, _: &Print, _, cx| this.print(cx)))
             .on_action(cx.listener(|_, _: &Exit, window, _| window.remove_window()))
             .on_action(cx.listener(|this, _: &Undo, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(undo, cx))))
             .on_action(cx.listener(|this, _: &Redo, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(redo, cx))))
@@ -811,6 +839,7 @@ impl Render for NoteyApp {
             .when(self.settings.show_menu, |d| d.child(self.menu_bar(cx)))
             .child(div().h(px(1.)).flex_none().bg(p.stroke))
             .child(body)
+            .children(self.find_in_files_panel(cx))
             .when(self.settings.show_status, |d| d.child(self.status_bar(cx)));
         let root = self.register_actions(root, cx);
         self.register_find_actions(root, cx)
