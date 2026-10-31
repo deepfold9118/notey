@@ -6,6 +6,16 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-31
+
+### Changed
+- The menu of the Notey icon (when the menu bar is hidden) is no longer one
+  long list. It has a submenu for File and for Edit, a Plugins and a Format
+  submenu for the commands of plugins, and About Notey.
+- Recent files are in an "Open Recent" submenu of the File menu.
+- Submenus can contain submenus, and screen readers can read the items of
+  open submenus.
+
 ## [0.8.1] - 2026-10-31
 
 ### Fixed
@@ -264,7 +274,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/deepfold9118/notey/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/deepfold9118/notey/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/deepfold9118/notey/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/deepfold9118/notey/compare/v0.6.0...v0.7.0

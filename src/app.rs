@@ -171,13 +171,13 @@ pub struct NoteyApp {
     languages: languages::LanguagesUi,
     scripting: scripting::Scripting,
     previews: preview::Previews,
-    /// The open submenu of a menu, and whether the pointer is over it.
-    open_submenu: Option<SharedString>,
-    submenu_hovered: bool,
+    /// The open submenus of a menu, outermost first, and which of them the
+    /// pointer is over (a bit per level).
+    open_submenus: Vec<SharedString>,
+    submenu_hovered: u32,
     /// The tab list on the left is being resized.
     resizing_tab_list: bool,
-    /// Where each submenu row of the open menu was drawn.
-    submenu_rows: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<SharedString, gpui::Bounds<gpui::Pixels>>>>,
+    submenu_rows: chrome::SubmenuRows,
     /// The window height, for the height of menus.
     viewport_h: f32,
     /// The accessibility tree, on Windows.
@@ -245,8 +245,8 @@ impl NoteyApp {
             languages,
             scripting: Default::default(),
             previews: Default::default(),
-            open_submenu: None,
-            submenu_hovered: false,
+            open_submenus: Vec::new(),
+            submenu_hovered: 0,
             resizing_tab_list: false,
             submenu_rows: Default::default(),
             viewport_h: 720.0,
@@ -935,7 +935,7 @@ impl Render for NoteyApp {
             main.into_any_element()
         };
         self.viewport_h = f32::from(window.viewport_size().height);
-        let submenu = self.submenu_popup(cx);
+        let submenus = self.submenu_popups(cx);
         self.update_accessibility(window, cx);
         let status = self.settings.show_status.then(|| self.status_bar(window, cx).into_any_element());
         // The window's focus is tracked below the title bar only: an element
@@ -966,7 +966,7 @@ impl Render for NoteyApp {
             .text_size(px(13.))
             .child(self.title_bar(window, cx))
             .child(content)
-            .children(submenu);
+            .children(submenus);
         let root = self.register_actions(root, cx);
         self.register_find_actions(root, cx)
     }

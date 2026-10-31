@@ -47,6 +47,10 @@ const STATUS_ITEM: u64 = 300;
 const SECTION: u64 = 400;
 const CONTROL: u64 = 500;
 const DIALOG_BUTTON: u64 = 700;
+/// The items of open submenus: a block of `SUBMENU_LEVEL` ids per level.
+const SUBMENU_ITEM: u64 = 2_000;
+const SUBMENU_LEVEL: u64 = 1_000;
+const SUBMENU_LEVELS: usize = 1 + ((TAB - SUBMENU_ITEM) / SUBMENU_LEVEL) as usize;
 const TAB: u64 = 10_000;
 const TEXT_RUN: u64 = 1_000_000;
 
@@ -153,50 +157,7 @@ impl NoteyApp {
         nodes.push((MENU_BAR, menu_bar));
         if let Some(menu) = self.open_menu.filter(|m| *m != Menu::Language) {
             let mut list = node(Role::Menu, "");
-            for (i, item) in self.menu_items(menu).into_iter().enumerate() {
-                let id = NodeId(MENU_ITEM + i as u64);
-                let n = match item {
-                    Item::Action { label, shortcut, .. } => {
-                        let mut n = node(Role::MenuItem, label.to_string());
-                        if !shortcut.is_empty() {
-                            n.set_keyboard_shortcut(shortcut);
-                        }
-                        n.add_action(Action::Click);
-                        n
-                    }
-                    Item::Choice { label, checked, .. } => {
-                        let mut n = node(if checked.is_some() { Role::MenuItemRadio } else { Role::MenuItem }, label.to_string());
-                        if let Some(c) = checked {
-                            n.set_toggled(Toggled::from(c));
-                        }
-                        n.add_action(Action::Click);
-                        n
-                    }
-                    Item::Plugin { label, shortcut, enabled, .. } => {
-                        let mut n = node(Role::MenuItem, label.to_string());
-                        if !shortcut.is_empty() {
-                            n.set_keyboard_shortcut(shortcut.to_string());
-                        }
-                        if enabled {
-                            n.add_action(Action::Click);
-                        } else {
-                            n.set_disabled();
-                        }
-                        n
-                    }
-                    Item::Submenu { label, items } => {
-                        let mut n = node(Role::MenuItem, label.to_string());
-                        n.set_expanded(self.open_submenu.as_ref() == Some(&label));
-                        n.add_action(Action::Click);
-                        let _ = items;
-                        n
-                    }
-                    Item::Heading(label) => node(Role::Label, label.to_string()),
-                    Item::Separator => node(Role::Splitter, ""),
-                };
-                list.push_child(id);
-                nodes.push((id, n));
-            }
+            self.menu_nodes(0, self.menu_items(menu), &mut list, &mut nodes);
             root.push_child(OPEN_MENU);
             nodes.push((OPEN_MENU, list));
         }
@@ -470,11 +431,11 @@ impl NoteyApp {
                 let menu = [Menu::File, Menu::Edit, Menu::Help][(id - MENU_FILE.0) as usize];
                 self.open_menu = if self.open_menu == Some(menu) { None } else { Some(menu) };
             }
-            (_, Action::Click) if (MENU_ITEM..FIND_BUTTON).contains(&id) => {
-                if let Some(menu) = self.open_menu {
-                    if let Some(item) = self.menu_items(menu).into_iter().nth((id - MENU_ITEM) as usize) {
-                        self.run_menu_item(item, window, cx);
-                    }
+            (_, Action::Click) if menu_item_at(id).is_some() => {
+                let (level, i) = menu_item_at(id).unwrap_or_default();
+                let item = self.open_menu.and_then(|menu| self.submenu_items(menu, level)).and_then(|items| items.into_iter().nth(i));
+                if let Some(item) = item {
+                    self.run_menu_item(item, level, window, cx);
                 }
             }
             (EDITOR, Action::Focus) => self.focus_active(window, cx),
@@ -537,5 +498,81 @@ impl NoteyApp {
             view.dispatch_spec(TransactionSpec::new().selection(EditorSelection::single(anchor, head)).scroll_into_view(), cx)
         });
         self.focus_active(window, cx);
+    }
+}
+
+/// The node id of item `i` of the menu at `level` (0 for the menu, 1 for
+/// its open submenu, ...).
+fn menu_item_id(level: usize, i: usize) -> NodeId {
+    if level == 0 {
+        NodeId(MENU_ITEM + i as u64)
+    } else {
+        NodeId(SUBMENU_ITEM + (level as u64 - 1) * SUBMENU_LEVEL + i as u64)
+    }
+}
+
+/// The level and index of a menu item node, the reverse of `menu_item_id`.
+fn menu_item_at(id: u64) -> Option<(usize, usize)> {
+    if (MENU_ITEM..FIND_BUTTON).contains(&id) {
+        Some((0, (id - MENU_ITEM) as usize))
+    } else if (SUBMENU_ITEM..TAB).contains(&id) {
+        let n = id - SUBMENU_ITEM;
+        Some(((n / SUBMENU_LEVEL) as usize + 1, (n % SUBMENU_LEVEL) as usize))
+    } else {
+        None
+    }
+}
+
+impl NoteyApp {
+    /// The nodes of `items`, the menu at `level` of the open menu, as
+    /// children of `parent`. An open submenu's items are its children.
+    fn menu_nodes(&self, level: usize, items: Vec<Item>, parent: &mut Node, nodes: &mut Vec<(NodeId, Node)>) {
+        for (i, item) in items.into_iter().enumerate() {
+            let id = menu_item_id(level, i);
+            let n = match item {
+                Item::Action { label, shortcut, .. } => {
+                    let mut n = node(Role::MenuItem, label.to_string());
+                    if !shortcut.is_empty() {
+                        n.set_keyboard_shortcut(shortcut);
+                    }
+                    n.add_action(Action::Click);
+                    n
+                }
+                Item::Choice { label, checked, .. } => {
+                    let mut n = node(if checked.is_some() { Role::MenuItemRadio } else { Role::MenuItem }, label.to_string());
+                    if let Some(c) = checked {
+                        n.set_toggled(Toggled::from(c));
+                    }
+                    n.add_action(Action::Click);
+                    n
+                }
+                Item::Plugin { label, shortcut, enabled, .. } => {
+                    let mut n = node(Role::MenuItem, label.to_string());
+                    if !shortcut.is_empty() {
+                        n.set_keyboard_shortcut(shortcut.to_string());
+                    }
+                    if enabled {
+                        n.add_action(Action::Click);
+                    } else {
+                        n.set_disabled();
+                    }
+                    n
+                }
+                Item::Submenu { label, items } => {
+                    let open = self.open_submenus.get(level) == Some(&label);
+                    let mut n = node(Role::MenuItem, label.to_string());
+                    n.set_expanded(open);
+                    n.add_action(Action::Click);
+                    if open && level + 1 < SUBMENU_LEVELS {
+                        self.menu_nodes(level + 1, items, &mut n, nodes);
+                    }
+                    n
+                }
+                Item::Heading(label) => node(Role::Label, label.to_string()),
+                Item::Separator => node(Role::Splitter, ""),
+            };
+            parent.push_child(id);
+            nodes.push((id, n));
+        }
     }
 }

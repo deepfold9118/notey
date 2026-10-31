@@ -19,7 +19,8 @@ By default, Notey shows a menu bar with the File, Edit, and Help menus.
 All settings are in the Settings tab. To open it, click the gear icon at the
 bottom left, or use Edit > Settings (Ctrl+,). For a more compact window,
 turn off "Show menu bar" in Settings > Appearance. Then the menus open from
-the Notey icon in the top-left of the title bar.
+the Notey icon in the top-left of the title bar, as File, Edit, Plugins and
+Format submenus.
 
 Up to 0.7.x, Notey was built with egui. That version is kept on the
 [`archive/egui-0.7`](https://github.com/deepfold9118/notey/tree/archive/egui-0.7)

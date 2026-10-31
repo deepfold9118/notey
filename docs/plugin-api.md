@@ -19,8 +19,8 @@
 
 | Field | Notes |
 |---|---|
-| `menu` | `"Plugins"` (the default) or `"Format"`. Since Notey 0.7.0, the commands of both values go in the Edit menu. |
-| `group` | name of a submenu in the Edit menu |
+| `menu` | `"Plugins"` (the default) or `"Format"`. Since Notey 0.7.0, the commands of both values go in the Edit menu of the menu bar. Since 0.8.2, the compact menu (the Notey icon, when the menu bar is hidden) has a Plugins and a Format submenu for them. |
+| `group` | name of a submenu for the command, inside the Edit menu (or the Plugins or Format submenu) |
 | `context: true` | also show the command in the editor's right-click menu |
 | `swatch: "#rrggbb"` | show a color square before the title |
 

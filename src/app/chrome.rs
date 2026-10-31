@@ -21,6 +21,14 @@ const ICON_W: f32 = 44.0;
 /// from a click elsewhere.
 const MENU_BAR_W: f32 = 200.0;
 
+/// The element ids of a menu's panel and of its submenus' panels, by level.
+const PANEL_IDS: [&str; 4] = ["menu", "submenu", "submenu2", "submenu3"];
+
+/// Where each submenu row of the open menu was drawn, by level and label.
+pub(super) type SubmenuRows = Rc<std::cell::RefCell<std::collections::HashMap<(usize, SharedString), gpui::Bounds<Pixels>>>>;
+
+type HoverListener = Box<dyn Fn(&bool, &mut Window, &mut App)>;
+
 static ICON: LazyLock<Arc<Image>> =
     LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, include_bytes!("../../notey_icon.png").to_vec())));
 
@@ -77,17 +85,20 @@ impl NoteyApp {
                     action("Open…", "Ctrl+O", Open),
                 ];
                 if !self.settings.recent_files.is_empty() {
-                    items.push(Item::Separator);
-                    items.push(Item::Heading("Open Recent".into()));
-                    for path in &self.settings.recent_files {
-                        let path = path.clone();
-                        let label = path.display().to_string().into();
-                        items.push(Item::Choice {
-                            label,
-                            checked: None,
-                            choose: Rc::new(move |this, window, cx| this.open_path(&path, window, cx)),
-                        });
-                    }
+                    let recent = self
+                        .settings
+                        .recent_files
+                        .iter()
+                        .map(|path| {
+                            let path = path.clone();
+                            Item::Choice {
+                                label: path.display().to_string().into(),
+                                checked: None,
+                                choose: Rc::new(move |this, window, cx| this.open_path(&path, window, cx)),
+                            }
+                        })
+                        .collect();
+                    items.push(Item::Submenu { label: "Open Recent".into(), items: recent });
                 }
                 items.extend([
                     Item::Separator,
@@ -100,38 +111,31 @@ impl NoteyApp {
                 ]);
                 items
             }
-            Menu::Edit => vec![
-                action("Undo", "Ctrl+Z", Undo),
-                action("Redo", "Ctrl+Y", Redo),
-                Item::Separator,
-                action("Cut", "Ctrl+X", Cut),
-                action("Copy", "Ctrl+C", Copy),
-                action("Paste", "Ctrl+V", Paste),
-                action("Delete", "Del", Delete),
-                Item::Separator,
-                action("Select All", "Ctrl+A", SelectAll),
-                action("Insert Time/Date", "F5", InsertTimeDate),
-                Item::Separator,
-                action("Find…", "Ctrl+F", find::Find),
-                action("Replace…", "Ctrl+H", find::Replace),
-                action("Find in Files…", "Ctrl+Shift+F", super::find_in_files::FindInFiles),
-                action("Go To…", "Ctrl+G", find::GoTo),
-                Item::Separator,
-                action("Settings", "Ctrl+,", OpenSettings),
-            ]
-            .into_iter()
-            .chain(crate::plugins::MENUS.iter().flat_map(|menu| {
-                let items = self.plugin_items(Some(menu));
-                let sep = (!items.is_empty()).then_some(Item::Separator);
-                sep.into_iter().chain(items)
-            }))
-            .collect(),
+            // The plugin commands follow, a section for each plugin menu.
+            Menu::Edit => self
+                .edit_items()
+                .into_iter()
+                .chain(crate::plugins::MENUS.iter().flat_map(|menu| {
+                    let items = self.plugin_items(Some(menu));
+                    let sep = (!items.is_empty()).then_some(Item::Separator);
+                    sep.into_iter().chain(items)
+                }))
+                .collect(),
             Menu::Help => vec![action("About Notey", "", About)],
             Menu::Context => self.context_menu_items(),
+            // A submenu for each menu of the menu bar, and for the commands
+            // of each plugin menu.
             Menu::All => {
-                let mut items = self.menu_items(Menu::File);
-                items.push(Item::Separator);
-                items.extend(self.menu_items(Menu::Edit));
+                let mut items = vec![
+                    Item::Submenu { label: "File".into(), items: self.menu_items(Menu::File) },
+                    Item::Submenu { label: "Edit".into(), items: self.edit_items() },
+                ];
+                for menu in crate::plugins::MENUS {
+                    let commands = self.plugin_items(Some(menu));
+                    if !commands.is_empty() {
+                        items.push(Item::Submenu { label: menu.into(), items: commands });
+                    }
+                }
                 items.push(Item::Separator);
                 items.extend(self.menu_items(Menu::Help));
                 items
@@ -171,6 +175,55 @@ impl NoteyApp {
         }
     }
 
+    /// The Edit menu's own commands, without those of plugins.
+    fn edit_items(&self) -> Vec<Item> {
+        vec![
+            action("Undo", "Ctrl+Z", Undo),
+            action("Redo", "Ctrl+Y", Redo),
+            Item::Separator,
+            action("Cut", "Ctrl+X", Cut),
+            action("Copy", "Ctrl+C", Copy),
+            action("Paste", "Ctrl+V", Paste),
+            action("Delete", "Del", Delete),
+            Item::Separator,
+            action("Select All", "Ctrl+A", SelectAll),
+            action("Insert Time/Date", "F5", InsertTimeDate),
+            Item::Separator,
+            action("Find…", "Ctrl+F", find::Find),
+            action("Replace…", "Ctrl+H", find::Replace),
+            action("Find in Files…", "Ctrl+Shift+F", super::find_in_files::FindInFiles),
+            action("Go To…", "Ctrl+G", find::GoTo),
+            Item::Separator,
+            action("Settings", "Ctrl+,", OpenSettings),
+        ]
+    }
+
+    /// The items of the submenus open at `levels` (the first `levels` of
+    /// `open_submenus`) inside `menu`; `None` when one of them is gone.
+    pub(super) fn submenu_items(&self, menu: Menu, levels: usize) -> Option<Vec<Item>> {
+        let mut items = self.menu_items(menu);
+        for label in self.open_submenus.iter().take(levels) {
+            items = items.into_iter().find_map(|item| match item {
+                Item::Submenu { label: l, items } if &l == label => Some(items),
+                _ => None,
+            })?;
+        }
+        Some(items)
+    }
+
+    /// Open the submenu `label` of the menu at `level`, closing any deeper ones.
+    fn open_submenu(&mut self, level: usize, label: SharedString) {
+        self.open_submenus.truncate(level);
+        self.open_submenus.push(label);
+    }
+
+    /// Close the open menu and its submenus.
+    fn close_menus(&mut self) {
+        self.open_menu = None;
+        self.open_submenus.clear();
+        self.submenu_hovered = 0;
+    }
+
     /// Whether `pos` is on something that opens a menu. A click there is
     /// left to that control, so it can switch or close the menu.
     fn in_menu_trigger(&self, pos: Point<Pixels>, window: &Window) -> bool {
@@ -182,9 +235,9 @@ impl NoteyApp {
     }
 
     fn toggle_menu(&mut self, menu: Menu, cx: &mut Context<Self>) {
-        self.open_submenu = None;
-        self.submenu_hovered = false;
-        self.open_menu = if self.open_menu == Some(menu) { None } else { Some(menu) };
+        let open = self.open_menu != Some(menu);
+        self.close_menus();
+        self.open_menu = open.then_some(menu);
         self.languages.focus_pending = self.open_menu == Some(Menu::Language);
         cx.notify();
     }
@@ -238,24 +291,36 @@ impl NoteyApp {
 
     pub(super) fn menu_panel(&self, menu: Menu, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        self.item_list("menu", self.menu_items(menu), cx)
+        self.item_list(0, self.menu_items(menu), cx)
             // Menus scroll when taller than the window; submenus are drawn
-            // outside them (`submenu_popup`).
+            // outside them (`submenu_popups`).
             .max_h(px(self.viewport_h - 16.))
             .overflow_y_scroll()
             .on_mouse_down_out(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
-                if !this.in_menu_trigger(ev.position, window) && !this.submenu_hovered {
-                    this.open_menu = None;
-                    this.open_submenu = None;
+                if !this.in_menu_trigger(ev.position, window) && this.submenu_hovered == 0 {
+                    this.close_menus();
                     cx.notify();
                 }
             }))
             .bg(p.popup)
     }
 
-    /// A menu panel with `items`; submenus open beside their row on hover.
-    fn item_list(&self, id: &'static str, items: Vec<Item>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    /// Pointing at an item of the menu at `level` closes the submenus open
+    /// below it.
+    fn close_deeper(level: usize, cx: &mut Context<Self>) -> HoverListener {
+        Box::new(cx.listener(move |this, hovered: &bool, _, cx| {
+            if *hovered && this.open_submenus.len() > level {
+                this.open_submenus.truncate(level);
+                cx.notify();
+            }
+        }))
+    }
+
+    /// The panel of the menu at `level` (0 for the menu, 1 for its open
+    /// submenu, ...), with `items`; submenus open beside their row on hover.
+    fn item_list(&self, level: usize, items: Vec<Item>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
+        let id = PANEL_IDS[level.min(PANEL_IDS.len() - 1)];
         let rows = items.into_iter().enumerate().map(|(i, item)| -> AnyElement {
             let row = || {
                 div()
@@ -272,6 +337,7 @@ impl NoteyApp {
             match item {
                 Item::Plugin { label, shortcut, swatch, enabled, script, cmd, source } => row()
                     .tooltip(crate::prompt::tooltip(source))
+                    .on_hover(Self::close_deeper(level, cx))
                     .justify_between()
                     .when(!enabled, |d| d.text_color(p.text_weak))
                     .child(
@@ -287,9 +353,7 @@ impl NoteyApp {
                     .child(div().text_color(p.text_weak).child(shortcut))
                     .when(enabled, |d| {
                         d.on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_menu = None;
-                            this.open_submenu = None;
-                            this.submenu_hovered = false;
+                            this.close_menus();
                             this.focus_active(window, cx);
                             this.run_plugin_command(script, &cmd, window, cx);
                             cx.notify();
@@ -297,11 +361,12 @@ impl NoteyApp {
                     })
                     .into_any_element(),
                 Item::Submenu { label, items: _ } => {
-                    let open = self.open_submenu.as_ref() == Some(&label);
+                    let open = self.open_submenus.get(level) == Some(&label);
                     let hover_label = label.clone();
-                    // The row's bounds, where `submenu_popup` puts the submenu.
+                    let click_label = label.clone();
+                    // The row's bounds, where `submenu_popups` puts the submenu.
                     let rows = self.submenu_rows.clone();
-                    let bounds_label = label.clone();
+                    let bounds_key = (level, label.clone());
                     row()
                         .relative()
                         .justify_between()
@@ -309,36 +374,42 @@ impl NoteyApp {
                         .child(label.clone())
                         .child(div().font_family(self.icon_font.clone()).text_size(px(9.)).child("\u{E76C}"))
                         .child(
-                            canvas(move |bounds, _, _| rows.borrow_mut().insert(bounds_label, bounds), |_, _, _, _| {})
+                            canvas(move |bounds, _, _| rows.borrow_mut().insert(bounds_key, bounds), |_, _, _, _| {})
                                 .absolute()
                                 .size_full(),
                         )
                         .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                            if *hovered && this.open_submenu.as_ref() != Some(&hover_label) {
-                                this.open_submenu = Some(hover_label.clone());
+                            if *hovered && this.open_submenus.get(level) != Some(&hover_label) {
+                                this.open_submenu(level, hover_label.clone());
                                 cx.notify();
                             }
+                        }))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_submenu(level, click_label.clone());
+                            cx.notify();
                         }))
                         .into_any_element()
                 }
                 Item::Action { label, shortcut, action } => row()
+                    .on_hover(Self::close_deeper(level, cx))
                     .justify_between()
                     .child(label)
                     .child(div().text_color(p.text_weak).child(shortcut))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_menu = None;
+                        this.close_menus();
                         this.focus_active(window, cx);
                         window.dispatch_action(action.boxed_clone(), cx);
                         cx.notify();
                     }))
                     .into_any_element(),
                 Item::Choice { label, checked, choose } => row()
+                    .on_hover(Self::close_deeper(level, cx))
                     .when_some(checked, |d, checked| {
                         d.child(div().w(px(12.)).text_color(p.accent).child(if checked { "✓" } else { "" }))
                     })
                     .child(label)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_menu = None;
+                        this.close_menus();
                         choose(this, window, cx);
                         this.focus_active(window, cx);
                         cx.notify();
@@ -816,55 +887,69 @@ impl NoteyApp {
 }
 
 impl NoteyApp {
-    /// The open submenu, beside its row in the open menu. It is drawn at the
-    /// window level, outside the menu, which may scroll.
-    pub(super) fn submenu_popup(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let menu = self.open_menu?;
-        let label = self.open_submenu.clone()?;
-        let row = *self.submenu_rows.borrow().get(&label)?;
-        let items = self.menu_items(menu).into_iter().find_map(|item| match item {
-            Item::Submenu { label: l, items } if l == label => Some(items),
-            _ => None,
-        })?;
-        let p = self.palette;
-        let panel = self
-            .item_list("submenu", items, cx)
-            .bg(p.popup)
-            .max_h(px(self.viewport_h - 16.))
-            .overflow_y_scroll()
-            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                this.submenu_hovered = *hovered;
-                cx.notify();
-            }));
-        let at = gpui::point(row.right(), row.top() - px(5.));
-        Some(
-            deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(panel))
-                .with_priority(3)
-                .into_any_element(),
-        )
+    /// The open submenus, each beside its row in the menu or submenu before
+    /// it. They are drawn at the window level, outside the menus, which may
+    /// scroll.
+    pub(super) fn submenu_popups(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(menu) = self.open_menu else { return Vec::new() };
+        let mut popups = Vec::new();
+        for (i, label) in self.open_submenus.clone().into_iter().enumerate() {
+            let level = i + 1;
+            let Some(row) = self.submenu_rows.borrow().get(&(i, label)).copied() else { break };
+            let Some(items) = self.submenu_items(menu, level) else { break };
+            let p = self.palette;
+            let bit = 1u32 << level.min(31);
+            let panel = self
+                .item_list(level, items, cx)
+                .bg(p.popup)
+                .max_h(px(self.viewport_h - 16.))
+                .overflow_y_scroll()
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    if *hovered {
+                        this.submenu_hovered |= bit;
+                    } else {
+                        this.submenu_hovered &= !bit;
+                    }
+                    cx.notify();
+                }));
+            let at = gpui::point(row.right(), row.top() - px(5.));
+            popups.push(
+                deferred(anchored().position(at).snap_to_window_with_margin(px(8.)).child(panel))
+                    .with_priority(3 + level)
+                    .into_any_element(),
+            );
+        }
+        popups
     }
 }
 
 impl NoteyApp {
-    /// Do what clicking a menu item does (for screen readers).
-    pub(super) fn run_menu_item(&mut self, item: Item, window: &mut Window, cx: &mut Context<Self>) {
+    /// Do what clicking an item of the menu at `level` does (for screen
+    /// readers).
+    pub(super) fn run_menu_item(&mut self, item: Item, level: usize, window: &mut Window, cx: &mut Context<Self>) {
         match item {
             Item::Action { action, .. } => {
-                self.open_menu = None;
+                self.close_menus();
                 self.focus_active(window, cx);
                 window.dispatch_action(action, cx);
             }
             Item::Choice { choose, .. } => {
-                self.open_menu = None;
+                self.close_menus();
                 choose(self, window, cx);
                 self.focus_active(window, cx);
             }
             Item::Plugin { script, cmd, enabled: true, .. } => {
-                self.open_menu = None;
+                self.close_menus();
                 self.focus_active(window, cx);
                 self.run_plugin_command(script, &cmd, window, cx);
             }
-            Item::Submenu { label, .. } => self.open_submenu = Some(label),
+            Item::Submenu { label, .. } => {
+                if self.open_submenus.get(level) == Some(&label) {
+                    self.open_submenus.truncate(level);
+                } else {
+                    self.open_submenu(level, label);
+                }
+            }
             _ => {}
         }
         cx.notify();
