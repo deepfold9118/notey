@@ -6,6 +6,7 @@
 mod chrome;
 mod find;
 mod settings_tab;
+mod spelling;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +32,7 @@ use crate::doc::Document;
 use crate::ipc::clean_path;
 use crate::session::{self, Session, SessionTab};
 use crate::settings::Settings;
+use crate::spellcheck::{spellcheck, SpellHandle};
 use crate::theme::{editor_theme, palette, Palette};
 
 use chrome::Menu;
@@ -153,6 +155,9 @@ pub struct NoteyApp {
     session_dirty: bool,
     /// A secondary window with unsaved tabs may close (the user agreed).
     allow_close: bool,
+    /// The spell checker, once the dictionaries have loaded.
+    spell: Option<SpellHandle>,
+    context_menu: Option<spelling::ContextMenu>,
     icon_font: SharedString,
     focus_handle: FocusHandle,
     last_title: String,
@@ -192,6 +197,8 @@ impl NoteyApp {
             is_primary,
             session_dirty: false,
             allow_close: false,
+            spell: None,
+            context_menu: None,
             icon_font: icon_font.into(),
             focus_handle: cx.focus_handle(),
             last_title: String::new(),
@@ -232,6 +239,7 @@ impl NoteyApp {
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |this, cx| this.should_close(window, cx)).unwrap_or(true)
         });
+        app.start_spell_load(cx);
         app.focus_active(window, cx);
         app
     }
@@ -253,6 +261,9 @@ impl NoteyApp {
         }
         if self.settings.line_numbers {
             exts.push(line_numbers());
+        }
+        if let (true, Some(spell)) = (self.settings.spellcheck, &self.spell) {
+            exts.push(spellcheck(spell.clone()));
         }
         Extension::list(exts)
     }
@@ -733,8 +744,13 @@ impl Render for NoteyApp {
                 .relative()
                 .flex_1()
                 .min_h_0()
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(|this, event, window, cx| this.open_context_menu(event, window, cx)),
+                )
                 .children(self.tabs.get(self.active).map(|t| t.view.clone()))
                 .children(self.find_bar(window, cx))
+                .children(self.context_popup(cx))
                 .into_any_element()
         };
         let root = div()

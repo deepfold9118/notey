@@ -8,6 +8,13 @@ impl NoteyApp {
     pub(super) fn settings_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let s = &self.settings;
+        let spell_status = match self.spell_languages() {
+            None => "Underline misspelled words. Loading the dictionaries…".to_string(),
+            Some(langs) if langs.is_empty() => {
+                "Underline misspelled words. Needs the Spellcheck plugin and a Language plugin".to_string()
+            }
+            Some(langs) => format!("Underline misspelled words: {}", langs.join(", ")),
+        };
         div()
             .id("settings")
             .flex_1()
@@ -50,6 +57,11 @@ impl NoteyApp {
                         "Line numbers",
                         "Show line numbers beside the text",
                         self.toggle("numbers", s.line_numbers, cx, |s| s.line_numbers = !s.line_numbers),
+                    ))
+                    .child(self.row(
+                        "Spellcheck",
+                        spell_status,
+                        self.toggle("spell", s.spellcheck, cx, |s| s.spellcheck = !s.spellcheck),
                     ))
                     .child(self.row(
                         "Font size",

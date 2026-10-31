@@ -29,6 +29,9 @@ pub struct Settings {
     /// Show the menu bar row. When off, the menus open from the title-bar icon.
     pub show_menu: bool,
     pub line_numbers: bool,
+    /// Underline misspelled words (needs the Spellcheck plugin and a
+    /// Language plugin).
+    pub spellcheck: bool,
     /// Editor font size in pixels, before zoom.
     pub font_size: f32,
     pub editor_font: String,
@@ -49,6 +52,7 @@ impl Default for Settings {
             show_status: true,
             show_menu: true,
             line_numbers: false,
+            spellcheck: true,
             font_size: 15.0,
             editor_font: "Consolas".into(),
             line_height: 1.0,
@@ -100,6 +104,7 @@ impl Settings {
         flag("show_status", &mut s.show_status);
         flag("menu_bar", &mut s.show_menu);
         flag("line_numbers", &mut s.line_numbers);
+        flag("spell", &mut s.spellcheck);
         let num = |key: &str| map.get(key).and_then(|v| v.parse::<f32>().ok());
         if let Some(v) = num("font_size") {
             s.font_size = v;

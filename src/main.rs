@@ -3,8 +3,14 @@
 mod app;
 mod doc;
 mod ipc;
+// Carried over from the egui version; the plugin manager that uses the
+// rest (install, update, enable) is not ported yet.
+#[allow(dead_code)]
+mod packages;
 mod session;
 mod settings;
+mod spell;
+mod spellcheck;
 mod theme;
 
 use std::path::PathBuf;

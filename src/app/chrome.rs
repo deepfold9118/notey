@@ -34,18 +34,21 @@ pub enum Menu {
     All,
     Encoding,
     LineEnding,
+    /// The editor's right-click menu.
+    Context,
 }
 
-type Choose = Rc<dyn Fn(&mut NoteyApp, &mut Window, &mut Context<NoteyApp>)>;
+pub(super) type Choose = Rc<dyn Fn(&mut NoteyApp, &mut Window, &mut Context<NoteyApp>)>;
 
-enum Item {
+pub(super) enum Item {
     Action { label: SharedString, shortcut: &'static str, action: Box<dyn Action> },
-    Choice { label: SharedString, checked: bool, choose: Choose },
+    /// `checked` is `None` for an item without a check mark column.
+    Choice { label: SharedString, checked: Option<bool>, choose: Choose },
     Heading(SharedString),
     Separator,
 }
 
-fn action(label: &'static str, shortcut: &'static str, action: impl Action) -> Item {
+pub(super) fn action(label: &'static str, shortcut: &'static str, action: impl Action) -> Item {
     Item::Action { label: label.into(), shortcut, action: Box::new(action) }
 }
 
@@ -66,7 +69,7 @@ impl NoteyApp {
                         let label = path.display().to_string().into();
                         items.push(Item::Choice {
                             label,
-                            checked: false,
+                            checked: None,
                             choose: Rc::new(move |this, window, cx| this.open_path(&path, window, cx)),
                         });
                     }
@@ -102,6 +105,7 @@ impl NoteyApp {
                 action("Settings", "Ctrl+,", OpenSettings),
             ],
             Menu::Help => vec![action("About Notey", "", About)],
+            Menu::Context => self.context_menu_items(),
             Menu::All => {
                 let mut items = self.menu_items(Menu::File);
                 items.push(Item::Separator);
@@ -116,7 +120,7 @@ impl NoteyApp {
                     .into_iter()
                     .map(|enc| Item::Choice {
                         label: enc.label().into(),
-                        checked: enc == current,
+                        checked: Some(enc == current),
                         choose: Rc::new(move |this, _, cx| {
                             let tab = &mut this.tabs[this.active];
                             tab.doc.encoding = enc;
@@ -131,7 +135,7 @@ impl NoteyApp {
                     .into_iter()
                     .map(|le| Item::Choice {
                         label: le.label().into(),
-                        checked: le == current,
+                        checked: Some(le == current),
                         choose: Rc::new(move |this, _, cx| {
                             let tab = &mut this.tabs[this.active];
                             tab.doc.line_ending = le;
@@ -158,7 +162,7 @@ impl NoteyApp {
         cx.notify();
     }
 
-    fn menu_panel(&self, menu: Menu, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn menu_panel(&self, menu: Menu, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let rows = self.menu_items(menu).into_iter().enumerate().map(|(i, item)| -> AnyElement {
             let row = || {
@@ -186,7 +190,9 @@ impl NoteyApp {
                     }))
                     .into_any_element(),
                 Item::Choice { label, checked, choose } => row()
-                    .child(div().w(px(12.)).text_color(p.accent).child(if checked { "✓" } else { "" }))
+                    .when_some(checked, |d, checked| {
+                        d.child(div().w(px(12.)).text_color(p.accent).child(if checked { "✓" } else { "" }))
+                    })
                     .child(label)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_menu = None;

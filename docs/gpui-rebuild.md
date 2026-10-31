@@ -17,6 +17,9 @@ Build: `cargo build` needs `codemirror-rs` next to this repository
 | `src/app/chrome.rs` | Title bar with tabs and caption buttons, menu bar and menus, status bar |
 | `src/app/find.rs` | The find and replace bar and the Go To bar |
 | `src/app/settings_tab.rs` | The Settings tab |
+| `src/app/spelling.rs` | Loading the dictionaries, and the editor's right-click menu with suggestions |
+| `src/spellcheck.rs` | The view plugin that underlines misspelled words in the visible lines |
+| `src/spell.rs`, `src/packages.rs` | Carried over: the Hunspell checker (spellbook), and the plugin store that finds the installed Spellcheck and Language plugins |
 | `src/settings.rs` | Settings as `settings.json`; imports the egui version's `app.ron` once |
 | `src/theme.rs` | Fluent palettes and the editor theme made from them |
 | `src/doc.rs`, `src/session.rs`, `src/ipc.rs` | Carried over from `main` (doc.rs now keeps only the saved text; the editor state holds the live text) |
@@ -53,6 +56,13 @@ Notey.
   matches. Its fields are small CodeMirror editors. The query is kept per
   tab and follows you to the next tab while the bar is open. Go To line
   (Ctrl+G) also takes `+n`, `-n`, `n%` and `line:column`.
+- Spellcheck: wavy red underlines, from the enabled Language plugins when
+  the Spellcheck plugin is installed (the plugins already in
+  `%APPDATA%\Notey\plugins` work as they are). Right-click a word for
+  suggestions and Add to dictionary (`user_dictionary.txt`, shared with
+  the egui version); Cut, Copy, Paste and Select All are below them. On or
+  off in Settings > Editor, which lists the loaded languages. Words with
+  digits (`2nd`) are no longer split and flagged as `nd`.
 - Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W,
   Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,, Ctrl+F,
   Ctrl+H, F3, Shift+F3 and Ctrl+G. In the editor, Ctrl+D selects the next
@@ -63,17 +73,18 @@ Notey.
 Get an old module with `git show main:src/<file>`.
 
 - Find in Files (`search.rs` carries over as is).
-- Spellcheck (`spell.rs` carries over; underlines as mark decorations,
-  suggestions in a context menu).
 - Syntax highlighting (`syntax.rs`, syntect) until the port's language
   package decides the parser; the language picker in the status bar.
-- Plugins (`plugins.rs`, `plugin_manager.rs`, `packages.rs`, Rhai scripts,
-  the plugin API in `docs/plugin-api.md`), Markdown preview, Text Color.
+- Plugins: Settings > Plugins to install, update, turn on or off and remove
+  plugins (`plugin_manager.rs`; `packages.rs` is already here, and its
+  install code is unused until then), Rhai scripts and their commands in
+  the menus and the right-click menu (`plugins.rs`, `docs/plugin-api.md`),
+  Markdown preview, Text Color.
 - Themes: imported VS Code and TextMate themes and the theme marketplace
   (`theme.rs`, `theme_marketplace.rs`).
 - Settings still missing: editor font picker, ligatures, autosave, tabs on
-  the left, spellcheck and plugin sections.
-- File watching and the reload prompt, Print, the right-click menu.
+  the left, the spellcheck language list and personal word list, plugins.
+- File watching and the reload prompt, Print.
 - Session end: `shutdown.rs` handled `WM_ENDSESSION` for winit. Under GPUI
   the session is saved every 30 s and on close; saving on Windows shutdown
   still needs a hook.
