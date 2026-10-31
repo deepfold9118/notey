@@ -1,13 +1,10 @@
 # Notey
 
 A native Rust notepad for Windows with dark mode, tabs, and spellcheck.
-Built with [egui/eframe](https://github.com/emilk/egui) and
-[spellbook](https://github.com/helix-editor/spellbook) (Hunspell-compatible).
-
-> **This branch (`rebuild/gpui`) rebuilds Notey on GPUI and a Rust port of
-> CodeMirror.** It is a work in progress; see
-> [docs/gpui-rebuild.md](docs/gpui-rebuild.md) for what works so far. The
-> rest of this README describes the egui version on `main`.
+Built with [GPUI](https://crates.io/crates/gpui) (the UI framework of the
+Zed editor), a Rust port of [CodeMirror 6](https://codemirror.net/) for the
+editor, and [spellbook](https://github.com/helix-editor/spellbook)
+(Hunspell-compatible) for spellcheck.
 
 ![Notey with three tabs open, showing syntax-highlighted Rust code in the dark Fluent theme](docs/screenshot.png)
 
@@ -15,8 +12,8 @@ The UI is styled after Fluent / WinUI (Windows 11 Notepad): a frameless
 window with a custom title bar containing the tab strip and caption
 buttons, Fluent dark and light palettes (`src/theme.rs`), Segoe UI
 Variable, rounded menus and dialogs, and an accent-colored selection.
-Window dragging, double-click maximize, and edge resizing are all
-implemented on top of the frameless window.
+Dialogs (save changes, reload, errors) are drawn inside the window in the
+same style.
 
 By default, Notey shows a menu bar with the File, Edit, and Help menus.
 All settings are in the Settings tab. To open it, click the gear icon at the
@@ -24,7 +21,15 @@ bottom left, or use Edit > Settings (Ctrl+,). For a more compact window,
 turn off "Show menu bar" in Settings > Appearance. Then the menus open from
 the Notey icon in the top-left of the title bar.
 
+Up to 0.7.x, Notey was built with egui. That version is kept on the
+[`archive/egui-0.7`](https://github.com/deepfold9118/notey/tree/archive/egui-0.7)
+branch.
+
 ## Run
+
+Notey depends on the crates of the CodeMirror port by path, so the
+`codemirror-rs` repository must be next to this one (`../codemirror-rs`).
+Then:
 
 ```
 cargo run --release
@@ -40,8 +45,9 @@ existing window (single-instance forwarding over a named pipe). Pass
 Closing the main window never loses work: open tabs — including unsaved
 text — are stored in a session (`%APPDATA%\Notey\data\session.json`, also
 snapshotted every ~30 s for crash safety) and restored the next time Notey
-starts. Closing an individual tab still prompts to save. Secondary
-`--new-window` windows have no session, so they prompt on close instead.
+starts. The session is also saved when Windows shuts down. Closing an
+individual tab still prompts to save. Secondary `--new-window` windows have
+no session, so they prompt on close instead.
 
 ## Features
 
@@ -68,8 +74,8 @@ starts. Closing an individual tab still prompts to save. Secondary
   Find in Files, Go To line (Ctrl+G), Insert Time/Date (F5), the commands of
   plugins, and Settings (Ctrl+,). Find Next is F3 and Find Previous is Shift+F3.
 - **Search**: regex find/replace via fancy-regex (lookaround +
-  backreferences, `$1` capture expansion in Replace), Mark All match
-  highlighting (preview editor), and **Find in Files** (Ctrl+Shift+F) —
+  backreferences, `$1` capture expansion in Replace), match case and whole
+  word, highlighting of all matches, and **Find in Files** (Ctrl+Shift+F) —
   background directory grep respecting .gitignore, with a results panel
   and click-to-open at the matching line
 - **Settings tab** (gear icon, Edit > Settings, or Ctrl+,): a list of
@@ -90,24 +96,26 @@ starts. Closing an individual tab still prompts to save. Secondary
   are flagged in the status bar)
 - **Recent Files** submenu in the File menu (last 10, persisted)
 - **Autosave** (Settings > Editor): periodically saves modified file-backed tabs
+- **Screen readers**: the window, menus, tabs, editor and status bar are
+  exposed through UI Automation (via [AccessKit](https://accesskit.dev/)),
+  so Narrator and other screen readers can read and operate them
 
 ## Editor
 
-Notey's default editor is its own virtualized widget (`src/editor.rs`),
-which replaced egui's TextEdit in 0.4.0; Settings > Editor >
-"Virtualized editor" switches back to the classic one. It lays out only the
-visible lines, so large files stay responsive, and it owns its
-cursor/selection/undo model (the foundation for multi-cursor, folding, and
-markers on the Notepad++ roadmap). For syntax highlighting, parse states are
-cached per line so only visible lines are ever parsed. It also supports word wrap
-(per-line wrap-row cache with placeholder invalidation), **multi-cursor
-editing** (Ctrl+Click
-to add cursors, Alt+drag for column/box selection, Escape to collapse; all
-cursors type/delete/paste simultaneously as one undo step), spellcheck with
-right-click suggestions, visual-row cursor navigation, undo integration for
-find/replace and plugin edits, and basic IME (caret-anchored candidate
-window, committed text insertion — no inline composition preview yet;
-the classic editor has it). Core logic is unit-tested (`cargo test`).
+The editor is [codemirror-rs](docs/codemirror-rust-design.md), a Rust port
+of CodeMirror 6's state, view, commands and search packages, drawn with
+GPUI. It lays out only the visible lines, so large files stay responsive,
+and syntax highlighting and spellcheck work on the visible lines only.
+
+- **Multiple cursors**: Ctrl+Click adds a cursor, Alt+drag makes a
+  column (box) selection, Ctrl+Alt+Up/Down adds a cursor above or below,
+  Ctrl+D selects the next occurrence of the selection, and Ctrl+Shift+L
+  selects all of them. Escape goes back to one cursor. All cursors type,
+  delete and paste together as one undo step.
+- Alt+Up/Down moves lines, Tab and Shift+Tab indent and outdent the
+  selected lines, and Ctrl+Backspace / Ctrl+Delete delete by word.
+- Undo groups typing, and find/replace and plugin edits can be undone too.
+- Word wrap, line numbers, and IME input with inline composition.
 
 ## Plugins
 
@@ -116,7 +124,8 @@ Notey keeps its core minimal; everything else is a plugin, managed from
 
 - **Features** — Spellcheck, Markdown Tools (Ctrl+B/I/E/K formatting, list
   continuation, rendered and side-by-side preview), Word Count, Autocorrect,
-  and Export & Print (HTML export, formatted printing via your browser).
+  Text Color, and Export & Print (HTML export, formatted printing via your
+  browser).
 - **Languages** — one spellcheck dictionary each (16 available: English
   variants, Spanish, French, German, Italian, Portuguese, Dutch, Polish,
   Swedish, Danish, Russian, Ukrainian). A word is accepted if any enabled
@@ -164,8 +173,8 @@ latest exe.
 
 - Print works on saved files: it hands the file to the default `.txt` print
   handler via the shell Print verb.
-- The spellchecker skips words with digits, URLs/emails (heuristic), and is
-  automatically disabled for files larger than 512 KB.
+- The spellchecker skips words with digits, URLs/emails (heuristic), and
+  ordinals such as "2nd".
 
 ## Download
 

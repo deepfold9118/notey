@@ -371,11 +371,10 @@ a general gutter API, and accessibility. Notey itself is then rebuilt on
 GPUI around this view (instead of the "experimental editor" switch that
 §6 planned for the egui app).
 
-The Notey rebuild has started on the `rebuild/gpui` branch: a GPUI app shell
-with Notey's title bar, tabs, menus, status bar, Settings tab, files,
-session and single-instance forwarding, one `EditorView` per tab. Its
-progress and the features still to port are in
-[gpui-rebuild.md](gpui-rebuild.md).
+The Notey rebuild is done: since 0.8.0, `main` is a GPUI app with Notey's
+title bar, tabs, menus, status bar, Settings tab, files, session and
+single-instance forwarding, one `EditorView` per tab. Its modules are
+listed in [gpui-rebuild.md](gpui-rebuild.md).
 
 `@codemirror/search` is ported as `codemirror-search` (cursors, queries,
 find and replace commands, match highlighting, key bindings; the host

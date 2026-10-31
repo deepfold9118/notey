@@ -1,9 +1,9 @@
 # Rebuilding Notey on GPUI and codemirror-rs
 
-The `rebuild/gpui` branch rebuilds Notey on [GPUI](https://crates.io/crates/gpui)
-(Zed's UI framework) and the Rust port of CodeMirror 6 in
-`D:\Projects\codemirror-rs` (see [codemirror-rust-design.md](codemirror-rust-design.md)
-§10). The egui version stays on `main` until the rebuild reaches parity.
+Since 0.8.0, Notey is built on [GPUI](https://crates.io/crates/gpui)
+(Zed's UI framework) and the Rust port of CodeMirror 6 in `codemirror-rs`
+(see [codemirror-rust-design.md](codemirror-rust-design.md) §10). The egui
+version (0.7.x) is kept on the `archive/egui-0.7` branch.
 
 Build: `cargo build` needs `codemirror-rs` next to this repository
 (`../codemirror-rs`), because Notey depends on its crates by path.

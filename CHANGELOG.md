@@ -6,6 +6,34 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-31
+
+### Changed
+- Notey is rebuilt on GPUI (the UI framework of the Zed editor) and a Rust
+  port of CodeMirror 6. It looks and works the same as 0.7.0, and all
+  plugins, themes, settings and sessions carry over. Drawing is done on the
+  GPU, so scrolling and typing in large files are faster.
+- The dialogs (save changes, reload, errors) are drawn in the Notey window
+  in the Fluent style, not as Windows message boxes.
+- Spellcheck and syntax highlighting work on the visible lines only, so
+  spellcheck is no longer turned off for files over 512 KB.
+- Tall menus scroll, and submenus open next to them.
+
+### Added
+- CodeMirror editing: Ctrl+D selects the next occurrence of the selection,
+  Ctrl+Shift+L selects all of them, Ctrl+Alt+Up/Down adds a cursor above or
+  below, and Alt+Up/Down moves lines. Ctrl+Click and Alt+drag still add
+  cursors and box selections.
+- IME input shows the text being composed in the line.
+
+### Fixed
+- Ordinals such as "2nd" are no longer marked as misspelled.
+
+### Removed
+- The "Virtualized editor" setting and the classic editor. There is one
+  editor now.
+- The egui version is kept on the `archive/egui-0.7` branch.
+
 ## [0.7.0] - 2026-10-24
 
 ### Added
@@ -229,7 +257,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/deepfold9118/notey/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/deepfold9118/notey/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/deepfold9118/notey/compare/v0.5.6...v0.6.0
 [0.5.6]: https://github.com/deepfold9118/notey/compare/v0.5.5...v0.5.6
