@@ -8,6 +8,9 @@ mod find;
 mod languages;
 mod settings_tab;
 mod spelling;
+mod watch;
+
+pub use watch::initial_bounds;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -163,6 +166,9 @@ pub struct NoteyApp {
     icon_font: SharedString,
     focus_handle: FocusHandle,
     last_title: String,
+    /// A reload prompt is showing.
+    reload_prompt: bool,
+    last_autosave: std::time::Instant,
     _tasks: Vec<Task<()>>,
 }
 
@@ -204,6 +210,8 @@ impl NoteyApp {
             icon_font: icon_font.into(),
             focus_handle: cx.focus_handle(),
             last_title: String::new(),
+            reload_prompt: false,
+            last_autosave: std::time::Instant::now(),
             _tasks: Vec::new(),
         };
         if is_primary {
@@ -237,6 +245,12 @@ impl NoteyApp {
                 }
             }));
         }
+        app._tasks.push(cx.spawn_in(window, async move |this, cx| loop {
+            cx.background_executor().timer(watch::WATCH_INTERVAL).await;
+            if this.update_in(cx, |this, window, cx| this.tick(window, cx)).is_err() {
+                break;
+            }
+        }));
         let this = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |this, cx| this.should_close(window, cx)).unwrap_or(true)
@@ -485,21 +499,31 @@ impl NoteyApp {
 
     /// Write the tab to its file. Returns whether it saved.
     fn write_tab(&mut self, idx: usize, cx: &mut Context<Self>) -> bool {
+        let saved = self.write_tab_quietly(idx, cx);
+        if saved {
+            let title = self.tabs[idx].doc.title();
+            self.flash(format!("Saved {title}"), cx);
+        }
+        saved
+    }
+
+    /// Write the tab to its file, reporting only a failure.
+    fn write_tab_quietly(&mut self, idx: usize, cx: &mut Context<Self>) -> bool {
         let text = self.tabs[idx].state(cx).doc().clone();
         let tab = &mut self.tabs[idx];
         match tab.doc.save(&text) {
             Ok(()) => {
                 tab.modified = false;
-                let title = tab.doc.title();
                 if let Some(path) = tab.doc.path.clone() {
                     self.note_recent(&path);
                 }
                 self.session_dirty = true;
-                self.flash(format!("Saved {title}"), cx);
+                cx.notify();
                 true
             }
             Err(e) => {
-                self.flash(format!("Save failed: {e}"), cx);
+                let title = tab.doc.title();
+                self.flash(format!("Could not save {title}: {e}"), cx);
                 false
             }
         }
@@ -595,6 +619,7 @@ impl NoteyApp {
     /// The window's close button. The primary window keeps unsaved tabs in
     /// the session; a secondary window asks first.
     fn should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.remember_window(window);
         self.settings.save();
         if self.is_primary {
             self.save_session(cx);
@@ -634,6 +659,7 @@ impl NoteyApp {
     fn update_settings(&mut self, change: impl FnOnce(&mut Settings), cx: &mut Context<Self>) {
         change(&mut self.settings);
         self.palette = palette(self.settings.dark);
+        crate::prompt::set_dark(self.settings.dark);
         self.find.set_palette(&self.palette, cx);
         for i in 0..self.tabs.len() {
             self.reconfigure_tab(i, cx);

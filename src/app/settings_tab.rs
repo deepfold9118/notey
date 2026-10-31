@@ -95,6 +95,22 @@ impl NoteyApp {
                             |s| s.tab_size = (s.tab_size - 1).max(1),
                             |s| s.tab_size = (s.tab_size + 1).min(16),
                         ),
+                    ))
+                    .child(self.row(
+                        "Autosave",
+                        "Save modified files that have a file name, on a timer",
+                        self.toggle("autosave", s.autosave, cx, |s| s.autosave = !s.autosave),
+                    ))
+                    .child(self.row(
+                        "Autosave interval",
+                        "Seconds between autosaves",
+                        self.stepper(
+                            "autosave-secs",
+                            format!("{:.0} s", s.autosave_secs),
+                            cx,
+                            |s| s.autosave_secs = (s.autosave_secs - 5.0).max(5.0),
+                            |s| s.autosave_secs = (s.autosave_secs + 5.0).min(600.0),
+                        ),
                     )),
             )
     }

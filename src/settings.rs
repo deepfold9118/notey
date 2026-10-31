@@ -41,7 +41,28 @@ pub struct Settings {
     pub tab_size: usize,
     /// Editor zoom in percent.
     pub zoom: f32,
+    /// Font ligatures (such as `->` drawn as an arrow) in the editor.
+    pub ligatures: bool,
+    /// Show the tabs as a vertical list on the left, not in the title bar.
+    pub tabs_left: bool,
+    /// The imported VS Code or TextMate theme in use, if any.
+    pub theme_path: Option<PathBuf>,
+    /// Save modified files every `autosave_secs` seconds.
+    pub autosave: bool,
+    pub autosave_secs: f32,
     pub recent_files: Vec<PathBuf>,
+    /// The window position and size when it last closed.
+    pub window: Option<WindowGeometry>,
+}
+
+/// A window position and size, in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WindowGeometry {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub maximized: bool,
 }
 
 impl Default for Settings {
@@ -58,7 +79,13 @@ impl Default for Settings {
             line_height: 1.0,
             tab_size: 4,
             zoom: 100.0,
+            ligatures: true,
+            tabs_left: false,
+            theme_path: None,
+            autosave: false,
+            autosave_secs: 30.0,
             recent_files: Vec::new(),
+            window: None,
         }
     }
 }
@@ -105,6 +132,12 @@ impl Settings {
         flag("menu_bar", &mut s.show_menu);
         flag("line_numbers", &mut s.line_numbers);
         flag("spell", &mut s.spellcheck);
+        flag("ligatures", &mut s.ligatures);
+        flag("tabs_left", &mut s.tabs_left);
+        flag("autosave", &mut s.autosave);
+        if let Some(v) = map.get("theme_path").filter(|v| !v.is_empty()) {
+            s.theme_path = Some(PathBuf::from(v));
+        }
         let num = |key: &str| map.get(key).and_then(|v| v.parse::<f32>().ok());
         if let Some(v) = num("font_size") {
             s.font_size = v;
@@ -114,6 +147,9 @@ impl Settings {
         }
         if let Some(v) = num("line_height") {
             s.line_height = v;
+        }
+        if let Some(v) = num("autosave_secs") {
+            s.autosave_secs = v;
         }
         if let Some(v) = num("tab_size") {
             s.tab_size = v.round().max(1.0) as usize;

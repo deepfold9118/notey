@@ -8,8 +8,10 @@ mod ipc;
 // rest (install, update, enable) is not ported yet.
 #[allow(dead_code)]
 mod packages;
+mod prompt;
 mod session;
 mod settings;
+mod shutdown;
 mod spell;
 mod spellcheck;
 mod syntax;
@@ -17,7 +19,7 @@ mod theme;
 
 use std::path::PathBuf;
 
-use gpui::{px, size, App, AppContext, Application, Bounds, TitlebarOptions, Window, WindowBounds, WindowOptions};
+use gpui::{px, size, App, AppContext, Application, TitlebarOptions, Window, WindowOptions};
 
 /// Release builds have no console, so a panic would otherwise vanish
 /// without a trace. Append it to `%APPDATA%\Notey\crash.log`.
@@ -66,8 +68,10 @@ fn main() {
 
     Application::new().run(move |cx: &mut App| {
         app::init(cx);
+        prompt::init(cx);
+        prompt::set_dark(settings::Settings::load().dark);
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1100.), px(720.)), cx))),
+            window_bounds: Some(app::initial_bounds(&settings::Settings::load(), cx)),
             // The title bar is Notey's own, with the tabs in it.
             titlebar: Some(TitlebarOptions { title: Some("Notey".into()), appears_transparent: true, ..Default::default() }),
             window_min_size: Some(size(px(480.), px(320.))),
@@ -77,7 +81,9 @@ fn main() {
         let (inbox, received) = futures::channel::mpsc::unbounded();
         cx.open_window(options, move |window, cx| {
             // The first instance owns the socket; later windows run standalone.
-            let is_primary = ipc::start_listener(inbox, main_hwnd(window));
+            let hwnd = main_hwnd(window);
+            shutdown::install(hwnd);
+            let is_primary = ipc::start_listener(inbox, hwnd);
             cx.new(|cx| app::NoteyApp::new(paths, is_primary, received, window, cx))
         })
         .expect("open the Notey window");

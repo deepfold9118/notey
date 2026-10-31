@@ -100,6 +100,21 @@ impl Document {
         Ok((doc, text))
     }
 
+    /// Re-read the file from disk. Returns its text, which becomes the saved
+    /// text; the language (a manual choice, perhaps) stays.
+    pub fn reload(&mut self) -> io::Result<String> {
+        let path = self
+            .path
+            .clone()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no file path"))?;
+        let (fresh, text) = Self::open(self.id, &path)?;
+        self.saved = fresh.saved;
+        self.encoding = fresh.encoding;
+        self.line_ending = fresh.line_ending;
+        self.disk_mtime = fresh.disk_mtime;
+        Ok(text)
+    }
+
     /// Recreate a file-backed tab with unsaved changes from session data.
     /// The on-disk content (if readable) becomes the saved baseline so the
     /// modified indicator and Save work as expected.
