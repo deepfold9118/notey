@@ -5,6 +5,7 @@
 
 mod chrome;
 mod find;
+mod languages;
 mod settings_tab;
 mod spelling;
 
@@ -29,6 +30,7 @@ use gpui::{
 };
 
 use crate::doc::Document;
+use crate::highlight::{highlighting, SyntaxSpec};
 use crate::ipc::clean_path;
 use crate::session::{self, Session, SessionTab};
 use crate::settings::Settings;
@@ -240,13 +242,15 @@ impl NoteyApp {
             this.update(cx, |this, cx| this.should_close(window, cx)).unwrap_or(true)
         });
         app.start_spell_load(cx);
+        app.start_syntax_build(cx);
         app.focus_active(window, cx);
         app
     }
 
     // ---------- tabs ----------
 
-    fn editor_config(&self) -> Extension {
+    /// The configuration of an editor whose document is in `language`.
+    fn editor_config(&self, language: Option<&str>) -> Extension {
         let mut exts = vec![
             THEME.of(Arc::new(editor_theme(&self.palette, &self.settings))),
             TAB_SIZE.of(self.settings.tab_size),
@@ -261,6 +265,13 @@ impl NoteyApp {
         }
         if self.settings.line_numbers {
             exts.push(line_numbers());
+        }
+        if let Some(name) = language {
+            exts.push(highlighting(SyntaxSpec {
+                name: name.to_string(),
+                dark: self.settings.dark,
+                generation: crate::syntax::generation(),
+            }));
         }
         if let (true, Some(spell)) = (self.settings.spellcheck, &self.spell) {
             exts.push(spellcheck(spell.clone()));
@@ -285,7 +296,7 @@ impl NoteyApp {
                     flag.store(true, Ordering::Relaxed);
                 }
             })),
-            self.config.of(self.editor_config()),
+            self.config.of(self.editor_config(doc.language.as_deref())),
         ]);
         let state = EditorState::create(EditorStateConfig::new().doc(text).extensions(extensions));
         let view = cx.new(|cx| EditorView::new(state.clone(), cx));
@@ -442,7 +453,8 @@ impl NoteyApp {
             return;
         }
         match Document::open(self.new_doc_id(), &path) {
-            Ok((doc, text)) => {
+            Ok((mut doc, text)) => {
+                doc.language = crate::syntax::detect(&path);
                 // Replace a pristine untitled tab.
                 if self.tabs.len() == 1 && self.tabs[0].doc.path.is_none() && self.tabs[0].state(cx).doc().is_empty()
                 {
@@ -623,13 +635,18 @@ impl NoteyApp {
         change(&mut self.settings);
         self.palette = palette(self.settings.dark);
         self.find.set_palette(&self.palette, cx);
-        let effect = self.config.reconfigure(self.editor_config());
-        for tab in &self.tabs {
-            let effect = effect.clone();
-            tab.view.update(cx, |view, cx| view.dispatch_spec(TransactionSpec::new().effect(effect), cx));
+        for i in 0..self.tabs.len() {
+            self.reconfigure_tab(i, cx);
         }
         self.settings.save();
         cx.notify();
+    }
+
+    /// Apply the settings and the tab's language to its editor.
+    fn reconfigure_tab(&self, idx: usize, cx: &mut Context<Self>) {
+        let tab = &self.tabs[idx];
+        let effect = self.config.reconfigure(self.editor_config(tab.doc.language.as_deref()));
+        tab.view.update(cx, |view, cx| view.dispatch_spec(TransactionSpec::new().effect(effect), cx));
     }
 
     fn flash(&mut self, msg: String, cx: &mut Context<Self>) {

@@ -18,6 +18,9 @@ Build: `cargo build` needs `codemirror-rs` next to this repository
 | `src/app/find.rs` | The find and replace bar and the Go To bar |
 | `src/app/settings_tab.rs` | The Settings tab |
 | `src/app/spelling.rs` | Loading the dictionaries, and the editor's right-click menu with suggestions |
+| `src/app/languages.rs` | Building the grammar set from the File Type plugins, and the language picker |
+| `src/highlight.rs` | The view plugin that colors the visible lines from a syntect parse cache |
+| `src/syntax.rs` | Carried over: the syntect grammar set, language detection and the per-line parse cache |
 | `src/spellcheck.rs` | The view plugin that underlines misspelled words in the visible lines |
 | `src/spell.rs`, `src/packages.rs` | Carried over: the Hunspell checker (spellbook), and the plugin store that finds the installed Spellcheck and Language plugins |
 | `src/settings.rs` | Settings as `settings.json`; imports the egui version's `app.ron` once |
@@ -63,6 +66,12 @@ Notey.
   the egui version); Cut, Copy, Paste and Select All are below them. On or
   off in Settings > Editor, which lists the loaded languages. Words with
   digits (`2nd`) are no longer split and flagged as `nd`.
+- Syntax highlighting with syntect, from the enabled File Type plugins (the
+  grammar cache in `plugins\.cache` is shared with the egui version). The
+  language is detected from the file extension and can be changed in the
+  status bar's language picker; it is saved in the session. Only the lines
+  down to the bottom of the screen are parsed, and an edit re-parses from
+  the edited line.
 - Keys: Ctrl+N, Ctrl+Shift+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W,
   Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+= / Ctrl+- / Ctrl+0, F5, Ctrl+,, Ctrl+F,
   Ctrl+H, F3, Shift+F3 and Ctrl+G. In the editor, Ctrl+D selects the next
@@ -73,8 +82,9 @@ Notey.
 Get an old module with `git show main:src/<file>`.
 
 - Find in Files (`search.rs` carries over as is).
-- Syntax highlighting (`syntax.rs`, syntect) until the port's language
-  package decides the parser; the language picker in the status bar.
+- The status bar's "Install … highlighting" offer for files with no File
+  Type plugin, and a filter field in the language picker (both need the
+  plugin manager or a text field in menus).
 - Plugins: Settings > Plugins to install, update, turn on or off and remove
   plugins (`plugin_manager.rs`; `packages.rs` is already here, and its
   install code is unused until then), Rhai scripts and their commands in

@@ -34,6 +34,8 @@ pub enum Menu {
     All,
     Encoding,
     LineEnding,
+    /// The language picker.
+    Language,
     /// The editor's right-click menu.
     Context,
 }
@@ -129,6 +131,7 @@ impl NoteyApp {
                     })
                     .collect()
             }
+            Menu::Language => self.language_menu_items(),
             Menu::LineEnding => {
                 let current = self.tabs[self.active].doc.line_ending;
                 LineEnding::ALL
@@ -212,6 +215,8 @@ impl NoteyApp {
             .occlude()
             .min_w(px(200.))
             .max_w(px(520.))
+            .max_h(px(440.))
+            .overflow_y_scroll()
             .py_1()
             .bg(p.popup)
             .border_1()
@@ -463,6 +468,16 @@ impl NoteyApp {
                     .child(item("chars", format!("{} characters", tab.chars).into(), None, cx))
                     .child(sep())
                     .child(item("zoom", format!("{:.0}%", self.settings.zoom).into(), None, cx))
+                    .child(sep())
+                    .child(
+                        item(
+                            "language",
+                            tab.doc.language.clone().unwrap_or_else(|| "Plain Text".into()).into(),
+                            Some(Menu::Language),
+                            cx,
+                        )
+                        .children(self.menu_popup(Menu::Language, false, cx)),
+                    )
                     .child(sep())
                     .child(
                         item("line-ending", tab.doc.line_ending.label().into(), Some(Menu::LineEnding), cx)

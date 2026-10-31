@@ -2,6 +2,7 @@
 
 mod app;
 mod doc;
+mod highlight;
 mod ipc;
 // Carried over from the egui version; the plugin manager that uses the
 // rest (install, update, enable) is not ported yet.
@@ -11,6 +12,7 @@ mod session;
 mod settings;
 mod spell;
 mod spellcheck;
+mod syntax;
 mod theme;
 
 use std::path::PathBuf;
