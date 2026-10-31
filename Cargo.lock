@@ -1017,6 +1017,7 @@ dependencies = [
 [[package]]
 name = "codemirror-commands"
 version = "0.1.0"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=5e21fb9#5e21fb95836b9e21b4fdb5abe69f2815df89a273"
 dependencies = [
  "codemirror-language",
  "codemirror-state",
@@ -1027,6 +1028,7 @@ dependencies = [
 [[package]]
 name = "codemirror-language"
 version = "0.1.0"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=5e21fb9#5e21fb95836b9e21b4fdb5abe69f2815df89a273"
 dependencies = [
  "codemirror-state",
 ]
@@ -1034,6 +1036,7 @@ dependencies = [
 [[package]]
 name = "codemirror-search"
 version = "0.1.0"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=5e21fb9#5e21fb95836b9e21b4fdb5abe69f2815df89a273"
 dependencies = [
  "codemirror-state",
  "codemirror-view",
@@ -1045,6 +1048,7 @@ dependencies = [
 [[package]]
 name = "codemirror-state"
 version = "0.1.0"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=5e21fb9#5e21fb95836b9e21b4fdb5abe69f2815df89a273"
 dependencies = [
  "crop",
  "unicode-segmentation",
@@ -1053,6 +1057,7 @@ dependencies = [
 [[package]]
 name = "codemirror-view"
 version = "0.1.0"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=5e21fb9#5e21fb95836b9e21b4fdb5abe69f2815df89a273"
 dependencies = [
  "codemirror-state",
  "gpui",

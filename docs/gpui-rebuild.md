@@ -5,8 +5,11 @@ Since 0.8.0, Notey is built on [GPUI](https://crates.io/crates/gpui)
 (see [codemirror-rust-design.md](codemirror-rust-design.md) §10). The egui
 version (0.7.x) is kept on the `archive/egui-0.7` branch.
 
-Build: `cargo build` needs `codemirror-rs` next to this repository
-(`../codemirror-rs`), because Notey depends on its crates by path.
+Build: Notey depends on the crates of
+[codemirror-rs](https://github.com/deepfold9118/codemirror-rs) by git
+revision. To work on both at once, point Notey at a local checkout with a
+`[patch."https://github.com/deepfold9118/codemirror-rs"]` section in
+`Cargo.toml`.
 
 ## Layout
 

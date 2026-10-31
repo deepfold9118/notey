@@ -1,7 +1,8 @@
 # A CodeMirror-style editing core for Notey, in Rust
 
 Status: **in progress.** Scope decided 2026-10-30 (§10). The Rust port lives
-in its own repository, `D:\Projects\codemirror-rs`; `@codemirror/state` is
+in its own repository,
+[codemirror-rs](https://github.com/deepfold9118/codemirror-rs); `@codemirror/state` is
 ported there as the `codemirror-state` crate.
 
 ## 1. Goal
@@ -314,8 +315,9 @@ included MIT-licensed code.
    around it. This replaces the "run beside, then swap" plan in §6: the
    milestones there now describe the order of the port, and Notey switches
    once the port reaches parity with today's editor.
-2. **Where:** its own repository, `D:\Projects\codemirror-rs` (local only
-   until the user decides to publish it). Notey will depend on it by path.
+2. **Where:** its own repository,
+   [codemirror-rs](https://github.com/deepfold9118/codemirror-rs). Notey
+   depends on it by git revision.
    One crate per CodeMirror package (`codemirror-state`,
    `codemirror-commands`, `codemirror-view`, ...) rather than the single
    crate sketched in §5; the modules inside each crate follow §5.

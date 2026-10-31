@@ -27,10 +27,6 @@ branch.
 
 ## Run
 
-Notey depends on the crates of the CodeMirror port by path, so the
-`codemirror-rs` repository must be next to this one (`../codemirror-rs`).
-Then:
-
 ```
 cargo run --release
 ```
@@ -102,9 +98,9 @@ no session, so they prompt on close instead.
 
 ## Editor
 
-The editor is [codemirror-rs](docs/codemirror-rust-design.md), a Rust port
-of CodeMirror 6's state, view, commands and search packages, drawn with
-GPUI. It lays out only the visible lines, so large files stay responsive,
+The editor is [codemirror-rs](https://github.com/deepfold9118/codemirror-rs),
+a Rust port of CodeMirror 6's state, view, commands and search packages,
+drawn with GPUI (design notes: [docs/codemirror-rust-design.md](docs/codemirror-rust-design.md)). It lays out only the visible lines, so large files stay responsive,
 and syntax highlighting and spellcheck work on the visible lines only.
 
 - **Multiple cursors**: Ctrl+Click adds a cursor, Alt+drag makes a

@@ -10,10 +10,10 @@ license = "Apache-2.0"
 
 [dependencies]
 gpui = "0.2.2"
-codemirror-state = { path = "../codemirror-rs/crates/state" }
-codemirror-view = { path = "../codemirror-rs/crates/view" }
-codemirror-commands = { path = "../codemirror-rs/crates/commands" }
-codemirror-search = { path = "../codemirror-rs/crates/search" }
+codemirror-state = { git = "https://github.com/deepfold9118/codemirror-rs", rev = "5e21fb9" }
+codemirror-view = { git = "https://github.com/deepfold9118/codemirror-rs", rev = "5e21fb9" }
+codemirror-commands = { git = "https://github.com/deepfold9118/codemirror-rs", rev = "5e21fb9" }
+codemirror-search = { git = "https://github.com/deepfold9118/codemirror-rs", rev = "5e21fb9" }
 chrono = "0.4"
 encoding_rs = "0.8"
 futures = "0.3"
