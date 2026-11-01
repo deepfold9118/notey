@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-01
+
+### Fixed
+- With line numbers on, the numbers of the lines just past the bottom of
+  the editor were drawn over the status bar.
+
 ## [0.8.3] - 2026-11-01
 
 ### Fixed
@@ -280,7 +286,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/deepfold9118/notey/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/deepfold9118/notey/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/deepfold9118/notey/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/deepfold9118/notey/compare/v0.8.0...v0.8.1
