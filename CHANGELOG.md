@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-01
+
+### Fixed
+- An editor font chosen in Notey 0.7 (such as "JetBrains Mono Regular")
+  was not found, and the editor fell back to a proportional font, in which
+  tabs and columns do not line up. Notey now changes such a name to its
+  font family, or to Consolas if no family matches.
+
 ## [0.8.4] - 2026-11-01
 
 ### Fixed
@@ -286,7 +294,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/deepfold9118/notey/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/deepfold9118/notey/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/deepfold9118/notey/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/deepfold9118/notey/compare/v0.8.1...v0.8.2

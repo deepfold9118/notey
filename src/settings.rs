@@ -116,6 +116,34 @@ impl Settings {
         }
     }
 
+    /// Make the editor font one of the installed font families in `fonts`.
+    /// The egui version stored names such as "JetBrains Mono Regular",
+    /// which name a face, not a family: words are dropped from the end
+    /// until a family matches, else the font becomes Consolas. Returns
+    /// whether the font changed.
+    pub fn resolve_font(&mut self, fonts: &[String]) -> bool {
+        let family = |name: &str| fonts.iter().find(|f| f.eq_ignore_ascii_case(name));
+        if fonts.is_empty() || family(&self.editor_font).is_some() {
+            return false;
+        }
+        let mut name = self.editor_font.trim();
+        let found = loop {
+            match name.rsplit_once(' ') {
+                Some((head, _)) => {
+                    name = head.trim_end();
+                    if let Some(f) = family(name) {
+                        break Some(f.clone());
+                    }
+                }
+                None => break None,
+            }
+        };
+        let font = found.unwrap_or_else(|| Settings::default().editor_font);
+        let changed = font != self.editor_font;
+        self.editor_font = font;
+        changed
+    }
+
     /// The editor font size after zoom.
     pub fn zoomed_font_size(&self) -> f32 {
         (self.font_size * self.zoom / 100.0).max(4.0)
@@ -183,5 +211,21 @@ mod tests {
         assert_eq!(s.tab_size, 8);
         assert_eq!(s.recent_files, vec![PathBuf::from(r"C:\a.txt")]);
         assert!(s.word_wrap);
+    }
+
+    #[test]
+    fn resolves_face_names_to_families() {
+        let fonts: Vec<String> =
+            ["Consolas", "JetBrains Mono", "JetBrains Mono Light", "Cambria"].map(String::from).to_vec();
+        let resolve = |name: &str| {
+            let mut s = Settings { editor_font: name.into(), ..Settings::default() };
+            let changed = s.resolve_font(&fonts);
+            (s.editor_font, changed)
+        };
+        assert_eq!(resolve("JetBrains Mono"), ("JetBrains Mono".into(), false));
+        assert_eq!(resolve("JetBrains Mono Regular"), ("JetBrains Mono".into(), true));
+        assert_eq!(resolve("JetBrains Mono Light Italic"), ("JetBrains Mono Light".into(), true));
+        assert_eq!(resolve("Cambria & Cambria Math"), ("Cambria".into(), true));
+        assert_eq!(resolve("Missing Font"), ("Consolas".into(), true));
     }
 }

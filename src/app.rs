@@ -212,8 +212,11 @@ impl NoteyApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let settings = Settings::load();
+        let mut settings = Settings::load();
         let fonts = cx.text_system().all_font_names();
+        if settings.resolve_font(&fonts) {
+            settings.save();
+        }
         let icon_font = if fonts.iter().any(|f| f == "Segoe Fluent Icons") {
             "Segoe Fluent Icons"
         } else {
