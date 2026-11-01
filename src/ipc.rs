@@ -27,8 +27,13 @@ fn socket_name() -> String {
 pub type Inbox = UnboundedSender<PathBuf>;
 
 /// Strip the `\\?\` verbatim prefix that `canonicalize` adds on Windows.
+/// A network path comes back as `\\?\UNC\server\share`, which becomes
+/// `\\server\share` again.
 pub fn clean_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
+    if let Some(unc) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
     match s.strip_prefix(r"\\?\") {
         Some(stripped) => PathBuf::from(stripped),
         None => p,
@@ -124,4 +129,19 @@ mod win {
 mod win {
     pub fn allow_foreground() {}
     pub fn activate(_hwnd: isize) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleans_verbatim_paths() {
+        assert_eq!(clean_path(PathBuf::from(r"\\?\C:\a.txt")), PathBuf::from(r"C:\a.txt"));
+        assert_eq!(
+            clean_path(PathBuf::from(r"\\?\UNC\server\share\a.txt")),
+            PathBuf::from(r"\\server\share\a.txt")
+        );
+        assert_eq!(clean_path(PathBuf::from(r"\\server\share\a.txt")), PathBuf::from(r"\\server\share\a.txt"));
+    }
 }
