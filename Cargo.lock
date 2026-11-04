@@ -1017,7 +1017,7 @@ dependencies = [
 [[package]]
 name = "codemirror-commands"
 version = "0.1.0"
-source = "git+https://github.com/deepfold9118/codemirror-rs?rev=e84a6ef#e84a6ef3c451b6a169d9da9a2867332947728a9f"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=c793037#c79303775419049d19db5f024cdb40425bb42985"
 dependencies = [
  "codemirror-language",
  "codemirror-state",
@@ -1028,7 +1028,7 @@ dependencies = [
 [[package]]
 name = "codemirror-language"
 version = "0.1.0"
-source = "git+https://github.com/deepfold9118/codemirror-rs?rev=e84a6ef#e84a6ef3c451b6a169d9da9a2867332947728a9f"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=c793037#c79303775419049d19db5f024cdb40425bb42985"
 dependencies = [
  "codemirror-state",
 ]
@@ -1036,7 +1036,7 @@ dependencies = [
 [[package]]
 name = "codemirror-search"
 version = "0.1.0"
-source = "git+https://github.com/deepfold9118/codemirror-rs?rev=e84a6ef#e84a6ef3c451b6a169d9da9a2867332947728a9f"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=c793037#c79303775419049d19db5f024cdb40425bb42985"
 dependencies = [
  "codemirror-state",
  "codemirror-view",
@@ -1048,7 +1048,7 @@ dependencies = [
 [[package]]
 name = "codemirror-state"
 version = "0.1.0"
-source = "git+https://github.com/deepfold9118/codemirror-rs?rev=e84a6ef#e84a6ef3c451b6a169d9da9a2867332947728a9f"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=c793037#c79303775419049d19db5f024cdb40425bb42985"
 dependencies = [
  "crop",
  "unicode-segmentation",
@@ -1057,7 +1057,7 @@ dependencies = [
 [[package]]
 name = "codemirror-view"
 version = "0.1.0"
-source = "git+https://github.com/deepfold9118/codemirror-rs?rev=e84a6ef#e84a6ef3c451b6a169d9da9a2867332947728a9f"
+source = "git+https://github.com/deepfold9118/codemirror-rs?rev=c793037#c79303775419049d19db5f024cdb40425bb42985"
 dependencies = [
  "codemirror-state",
  "gpui",
@@ -3579,7 +3579,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "notey"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "accesskit",
  "accesskit_windows",

@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-04
+
+### Fixed
+- Notey could crash while opening or scrolling a long document that
+  contains characters of more than one byte in UTF-8, such as the
+  box-drawing characters of text diagrams, when word wrap is on.
+
 ## [0.8.5] - 2026-11-01
 
 ### Fixed
@@ -294,7 +301,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/deepfold9118/notey/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/deepfold9118/notey/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/deepfold9118/notey/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/deepfold9118/notey/compare/v0.8.2...v0.8.3
