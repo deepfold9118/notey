@@ -8,6 +8,7 @@ mod chrome;
 mod find;
 mod find_in_files;
 mod languages;
+mod updates;
 mod settings_tab;
 mod spelling;
 mod themes;
@@ -73,6 +74,7 @@ actions!(
         Paste,
         Delete,
         SelectAll,
+        CheckForUpdates,
         About,
     ]
 );
@@ -191,6 +193,10 @@ pub struct NoteyApp {
     /// Owns the single-instance socket and the saved session. Secondary
     /// windows neither restore nor overwrite the session.
     is_primary: bool,
+    /// When this window opened (for the first update check).
+    started: std::time::Instant,
+    /// An update check or download is running.
+    update_busy: bool,
     session_dirty: bool,
     /// A secondary window with unsaved tabs may close (the user agreed).
     allow_close: bool,
@@ -261,6 +267,8 @@ impl NoteyApp {
             status_msg: None,
             flash_task: None,
             is_primary,
+            started: std::time::Instant::now(),
+            update_busy: false,
             session_dirty: false,
             allow_close: false,
             spell: None,
@@ -908,6 +916,7 @@ impl NoteyApp {
                 this.with_editor(cx, |v, cx| _ = v.run_state_command(codemirror_commands::delete_char_forward, cx))
             }))
             .on_action(cx.listener(|this, _: &SelectAll, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(select_all, cx))))
+            .on_action(cx.listener(|this, _: &CheckForUpdates, window, cx| this.check_for_update(true, window, cx)))
             .on_action(cx.listener(|_, _: &About, window, cx| {
                 let detail = format!("Version {}\nA native notepad, rebuilt on GPUI and a Rust port of CodeMirror.", env!("CARGO_PKG_VERSION"));
                 drop(window.prompt(PromptLevel::Info, "Notey", Some(&detail), &["OK"], cx));

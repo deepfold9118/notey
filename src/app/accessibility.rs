@@ -290,7 +290,7 @@ impl NoteyApp {
     fn settings_nodes(&self) -> Vec<(NodeId, Node)> {
         let mut nodes = Vec::new();
         let mut settings = node(Role::TabPanel, "Settings");
-        for (i, s) in [Section::Editor, Section::Appearance, Section::Spellcheck, Section::Plugins].iter().enumerate() {
+        for (i, s) in Section::ALL.iter().enumerate() {
             let id = NodeId(SECTION + i as u64);
             let mut n = node(Role::Tab, s.label());
             n.set_selected(self.settings_ui.section == *s);
@@ -390,6 +390,10 @@ impl NoteyApp {
                 v.push(Control::Text(format!("Languages: {}", if langs.is_empty() { "none".into() } else { langs.join(", ") }).into()));
                 v
             }
+            Section::Updates => vec![
+                toggle("Check for updates automatically", s.check_updates, |s| s.check_updates = !s.check_updates),
+                Control::Text(format!("Notey {}", crate::update::current_version()).into()),
+            ],
             Section::Plugins => self
                 .plugins
                 .store
@@ -459,8 +463,7 @@ impl NoteyApp {
                 }
             }
             (_, Action::Click) if (SECTION..CONTROL).contains(&id) => {
-                let sections = [Section::Editor, Section::Appearance, Section::Spellcheck, Section::Plugins];
-                if let Some(s) = sections.get((id - SECTION) as usize) {
+                if let Some(s) = Section::ALL.get((id - SECTION) as usize) {
                     self.settings_ui.section = *s;
                 }
             }

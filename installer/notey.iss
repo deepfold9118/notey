@@ -1,5 +1,5 @@
 #define MyAppName "Notey"
-#define MyAppVersion "0.8.7"
+#define MyAppVersion "0.8.8"
 #define MyAppPublisher "Notey"
 #define MyAppExeName "notey.exe"
 ; extensions offered in the Open With menu
@@ -95,6 +95,13 @@ const
   Extensions = '{#Exts}';
   RetiredExtensions = '{#RetiredExts}';
   InstallerStateKey = 'Software\Notey\Installer';
+
+// Notey's updater runs the installer with /RELAUNCH=1 to start Notey again
+// after a silent upgrade.
+function Relaunch(): Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
 
 function NormalizePathEntry(Value: String): String;
 begin
@@ -281,3 +288,4 @@ end;
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: Relaunch

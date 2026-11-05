@@ -95,6 +95,9 @@ no session, so they prompt on close instead.
   are flagged in the status bar)
 - **Recent Files** submenu in the File menu (last 10, persisted)
 - **Autosave** (Settings > Editor): periodically saves modified file-backed tabs
+- **Updates**: once a day Notey looks for a newer release and offers to
+  install it (checksum-verified; your tabs are kept). Help > Check for
+  Updates looks right away; Settings > Updates turns the daily check off
 - **Screen readers**: the window, menus, tabs, editor and status bar are
   exposed through UI Automation (via [AccessKit](https://accesskit.dev/)),
   so Narrator and other screen readers can read and operate them

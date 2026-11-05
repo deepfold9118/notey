@@ -16,6 +16,7 @@ impl NoteyApp {
     /// Runs every [`WATCH_INTERVAL`].
     pub(super) fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.check_disk(window, cx);
+        self.maybe_check_for_update(window, cx);
         if self.settings.autosave && self.last_autosave.elapsed().as_secs_f32() >= self.settings.autosave_secs.max(5.0) {
             self.last_autosave = Instant::now();
             let mut saved = 0;

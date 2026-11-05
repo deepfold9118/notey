@@ -13,10 +13,12 @@ pub(super) enum Section {
     Appearance,
     Spellcheck,
     Plugins,
+    Updates,
 }
 
 impl Section {
-    const ALL: [Section; 4] = [Section::Editor, Section::Appearance, Section::Spellcheck, Section::Plugins];
+    pub(super) const ALL: [Section; 5] =
+        [Section::Editor, Section::Appearance, Section::Spellcheck, Section::Plugins, Section::Updates];
 
     pub(super) fn label(self) -> &'static str {
         match self {
@@ -24,6 +26,7 @@ impl Section {
             Section::Appearance => "Appearance",
             Section::Spellcheck => "Spellcheck",
             Section::Plugins => "Plugins",
+            Section::Updates => "Updates",
         }
     }
 }
@@ -98,6 +101,7 @@ impl NoteyApp {
             Section::Appearance => self.settings_appearance(cx),
             Section::Spellcheck => self.settings_spellcheck(cx),
             Section::Plugins => self.settings_plugins(window, cx),
+            Section::Updates => self.settings_updates(cx),
         };
         div().flex_1().min_h_0().flex().bg(p.editor).child(nav).child(
             div().id("settings-content").flex_1().min_w_0().overflow_y_scroll().child(
@@ -424,6 +428,27 @@ impl NoteyApp {
             }
         }
         body.into_any_element()
+    }
+
+    fn settings_updates(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let s = &self.settings;
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.row(
+                "Check for updates automatically",
+                "Once a day, look for a newer release of Notey on GitHub and offer to install it",
+                self.toggle("check-updates", s.check_updates, cx, |s| s.check_updates = !s.check_updates),
+            ))
+            .child(self.row(
+                format!("Notey {}", crate::update::current_version()),
+                "The version you are using",
+                self.text_button("check-now", "Check Now")
+                    .on_click(cx.listener(|this, _, window, cx| this.check_for_update(true, window, cx)))
+                    .into_any_element(),
+            ))
+            .into_any_element()
     }
 
     pub(super) fn section_heading(&self, title: &'static str) -> impl IntoElement {

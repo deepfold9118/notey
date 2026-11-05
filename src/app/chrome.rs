@@ -121,7 +121,7 @@ impl NoteyApp {
                     sep.into_iter().chain(items)
                 }))
                 .collect(),
-            Menu::Help => vec![action("About Notey", "", About)],
+            Menu::Help => vec![action("Check for Updates...", "", CheckForUpdates), action("About Notey", "", About)],
             Menu::Context => self.context_menu_items(),
             // A submenu for each menu of the menu bar, and for the commands
             // of each plugin menu.

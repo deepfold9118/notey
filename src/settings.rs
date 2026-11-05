@@ -55,6 +55,12 @@ pub struct Settings {
     pub recent_files: Vec<PathBuf>,
     /// The window position and size when it last closed.
     pub window: Option<WindowGeometry>,
+    /// Look for a newer release of Notey once a day.
+    pub check_updates: bool,
+    /// A release not to offer again, such as "0.8.9".
+    pub skipped_version: Option<String>,
+    /// When Notey last looked for a release, in seconds since 1970.
+    pub last_update_check: i64,
 }
 
 /// A window position and size, in logical pixels.
@@ -89,6 +95,9 @@ impl Default for Settings {
             autosave_secs: 30.0,
             recent_files: Vec::new(),
             window: None,
+            check_updates: true,
+            skipped_version: None,
+            last_update_check: 0,
         }
     }
 }

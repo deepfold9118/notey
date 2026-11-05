@@ -6,6 +6,17 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-11-05
+
+### Added
+- Notey looks for a newer release on GitHub once a day and offers to
+  install it: Update Now, Later, or Skip This Version. Updating downloads
+  the installer, checks it against the release's SHA-256 checksum, closes
+  Notey with its tabs kept in the session, upgrades it and starts it again.
+  If other Notey windows are open, Notey first warns that the update
+  closes them. Help > Check for Updates looks right away. Settings >
+  Updates turns the daily check off.
+
 ## [0.8.7] - 2026-11-05
 
 ### Added
@@ -321,7 +332,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/deepfold9118/notey/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/deepfold9118/notey/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/deepfold9118/notey/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/deepfold9118/notey/compare/v0.8.4...v0.8.5

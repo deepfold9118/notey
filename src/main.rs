@@ -24,6 +24,7 @@ mod syntax;
 mod theme;
 mod theme_import;
 mod theme_marketplace;
+mod update;
 
 use std::path::PathBuf;
 
