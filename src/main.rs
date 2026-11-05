@@ -2,6 +2,7 @@
 
 mod a11y;
 mod app;
+mod detect;
 mod doc;
 mod highlight;
 mod ipc;

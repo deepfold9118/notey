@@ -683,7 +683,14 @@ impl NoteyApp {
                 };
                 left = left.child(item("pos", pos, None, cx));
                 let hint = match (&tab.doc.path, &tab.doc.language, &self.status_msg) {
-                    (Some(path), None, None) => self.plugins.suggestion_for(path).map(|m| (m.id.clone(), m.name.clone())),
+                    (Some(path), None, None) if !tab.doc.auto_language => {
+                        self.plugins.suggestion_for(path).map(|m| (m.id.clone(), m.name.clone()))
+                    }
+                    (_, _, None) => tab
+                        .suggestion
+                        .as_deref()
+                        .and_then(|id| self.plugins.available(id))
+                        .map(|m| (m.id.clone(), m.name.clone())),
                     _ => None,
                 };
                 if let Some((id, name)) = hint {

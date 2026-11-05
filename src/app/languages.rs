@@ -1,5 +1,6 @@
 //! Syntax highlighting: building the grammar set from the enabled File Type
-//! plugins, and the language picker in the status bar.
+//! plugins, guessing the file type from the text, and the language picker
+//! in the status bar.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use gpui::{anchored, deferred, uniform_list, AnyElement, Corner};
@@ -7,10 +8,62 @@ use gpui::{anchored, deferred, uniform_list, AnyElement, Corner};
 use super::chrome::Menu;
 use super::find::{field_editor, field_text, field_theme, select_field, set_field_text};
 use super::*;
-use crate::packages::{Kind, Store};
-use crate::syntax;
+use crate::packages::{Installed, Kind, Store};
+use crate::{detect, syntax};
+
+/// How long typing must pause before the file type is guessed again.
+pub(super) const DETECT_DELAY: Duration = Duration::from_millis(600);
+
+/// The name of the syntax that an installed File Type plugin provides.
+fn syntax_of(plugin: &Installed) -> Option<String> {
+    plugin.manifest.extensions.iter().find_map(|ext| syntax::detect(Path::new(&format!("x.{ext}"))))
+}
 
 impl NoteyApp {
+    /// Guess the file type of the tab with document `id` from its text,
+    /// when the file type follows the text. Switch to the File Type plugin
+    /// it looks like, or offer to install that plugin.
+    pub(super) fn detect_language(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(idx) = self.tab_index(id) else { return };
+        let tab = &self.tabs[idx];
+        if !tab.doc.auto_language {
+            return;
+        }
+        let doc = tab.state(cx).doc();
+        // One byte past the limit tells `detect` that this is not the whole text.
+        let end = doc.floor_char_boundary(doc.len().min(detect::MAX_BYTES + 1));
+        let text = doc.slice_string(0, end, "
+");
+        let mut language = tab.doc.language.clone();
+        let mut suggestion = None;
+        match detect::detect(&text) {
+            Some(plugin) => match self.plugins.store.get(plugin) {
+                Some(installed) if self.plugins.store.is_enabled(plugin) => {
+                    if let Some(name) = syntax_of(installed) {
+                        language = Some(name);
+                    }
+                }
+                // Turned off on purpose: leave the file type alone.
+                Some(_) => {}
+                None => {
+                    language = None;
+                    suggestion = self.plugins.available(plugin).map(|m| m.id.clone());
+                }
+            },
+            None if text.trim().is_empty() => language = None,
+            // Unclear, perhaps half typed: keep the file type.
+            None => {}
+        }
+        let tab = &mut self.tabs[idx];
+        tab.suggestion = suggestion;
+        if tab.doc.language != language {
+            tab.doc.language = language;
+            self.reconfigure_tab(idx, cx);
+            self.session_dirty = true;
+        }
+        cx.notify();
+    }
+
     /// Build the grammar set from the enabled File Type plugins in the
     /// background, with an on-disk cache keyed to exactly those plugins
     /// (the same cache the egui version kept).
@@ -18,6 +71,9 @@ impl NoteyApp {
         let store = Store::open();
         let mut grammars = Vec::new();
         let mut hasher = DefaultHasher::new();
+        // Bumped when building changes, so that older caches are rebuilt.
+        // 2: grammars without a name are named after their file.
+        2u32.hash(&mut hasher);
         let mut enabled: Vec<_> = store.enabled(Kind::Filetype).collect();
         enabled.sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
         for p in &enabled {
@@ -59,6 +115,11 @@ impl NoteyApp {
                         }
                     }
                 }
+                // Tabs whose text looks like a file type installed just now.
+                let auto: Vec<u64> = this.tabs.iter().filter(|t| t.doc.auto_language).map(|t| t.doc.id).collect();
+                for id in auto {
+                    this.detect_language(id, cx);
+                }
                 this.update_settings(|_| {}, cx);
             });
         }));
@@ -66,6 +127,9 @@ impl NoteyApp {
 
     pub(super) fn set_language(&mut self, language: Option<String>, cx: &mut Context<Self>) {
         let idx = self.active;
+        // A file type chosen by hand stays.
+        self.tabs[idx].doc.auto_language = false;
+        self.tabs[idx].suggestion = None;
         self.tabs[idx].doc.language = language;
         self.reconfigure_tab(idx, cx);
         self.session_dirty = true;

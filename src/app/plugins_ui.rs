@@ -78,6 +78,14 @@ impl PluginsUi {
         })
     }
 
+    /// The registry entry of plugin `id`, if it is not installed.
+    pub(super) fn available(&self, id: &str) -> Option<&Manifest> {
+        if self.store.get(id).is_some() {
+            return None;
+        }
+        self.index.as_ref()?.iter().find(|m| m.id == id)
+    }
+
     fn name_of(&self, id: &str) -> String {
         self.index.iter().flatten().find(|m| m.id == id).map(|m| m.name.clone()).unwrap_or_else(|| id.to_string())
     }

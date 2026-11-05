@@ -6,6 +6,26 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-05
+
+### Added
+- Untitled tabs, and files without an extension, get their file type from
+  their text. When typing pauses or text is pasted, Notey recognizes JSON,
+  XML, HTML, Markdown, Python, Rust, JavaScript, C and C++, C#, Java, Go,
+  SQL, YAML, CSS, shell scripts, batch files, PHP, Ruby, Lua, Perl,
+  makefiles, diffs and LaTeX. If the File Type plugin for it is not
+  installed, the status bar offers to install it, and the tab switches
+  when it is. Choosing a file type in the status bar, or saving under a
+  name with an extension, keeps the file type from then on.
+
+### Fixed
+- Save As did not change the file type of the tab. A new tab saved as a
+  `.md` file stayed Plain Text, without highlighting and without the
+  rendered and side-by-side Markdown views. Save As now picks the file type
+  from the new name, as opening the file does.
+- The Go and Lua file types showed as "Unnamed" in the status bar, because
+  their grammars have no name. They are now named after their files.
+
 ## [0.8.6] - 2026-11-04
 
 ### Fixed
@@ -301,7 +321,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/deepfold9118/notey/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/deepfold9118/notey/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/deepfold9118/notey/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/deepfold9118/notey/compare/v0.8.3...v0.8.4

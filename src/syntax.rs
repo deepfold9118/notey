@@ -102,9 +102,11 @@ pub fn build(grammars: &[PathBuf], cache: Option<&Path>) -> (Syntaxes, Vec<Strin
     let mut b = SyntaxSetBuilder::new();
     b.add_plain_text_syntax();
     for path in grammars {
+        // A grammar without a `name` is named after its file ("Go.sublime-syntax").
+        let stem = path.file_stem().and_then(|s| s.to_str());
         let parsed = std::fs::read_to_string(path)
             .map_err(|e| e.to_string())
-            .and_then(|src| SyntaxDefinition::load_from_str(&src, true, None).map_err(|e| e.to_string()));
+            .and_then(|src| SyntaxDefinition::load_from_str(&src, true, stem).map_err(|e| e.to_string()));
         match parsed {
             Ok(def) => b.add(def),
             Err(e) => errors.push(format!(

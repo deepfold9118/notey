@@ -56,6 +56,10 @@ pub struct Document {
     pub untitled_n: usize,
     /// Syntax name for highlighting; None = plain text.
     pub language: Option<String>,
+    /// Whether the file type follows the text (see `detect`): for untitled
+    /// documents and files without an extension, until the file type is
+    /// chosen by hand or by saving under a name that has an extension.
+    pub auto_language: bool,
     /// Last known on-disk modification time (None for untitled docs or
     /// after the file disappeared).
     pub disk_mtime: Option<std::time::SystemTime>,
@@ -71,6 +75,7 @@ impl Document {
             line_ending: LineEnding::Crlf,
             untitled_n,
             language: None,
+            auto_language: true,
             disk_mtime: None,
         }
     }
@@ -95,6 +100,7 @@ impl Document {
             line_ending,
             untitled_n: 0,
             language: None,
+            auto_language: path.extension().is_none(),
             disk_mtime: std::fs::metadata(path).and_then(|m| m.modified()).ok(),
         };
         Ok((doc, text))

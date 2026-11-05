@@ -123,6 +123,10 @@ struct Tab {
     chars: usize,
     line: usize,
     col: usize,
+    /// A File Type plugin, not installed, that the text looks like.
+    suggestion: Option<String>,
+    /// The pending file type detection after an edit.
+    detecting: Option<Task<()>>,
     _observe: Subscription,
 }
 
@@ -401,6 +405,8 @@ impl NoteyApp {
             chars: 0,
             line: 1,
             col: 1,
+            suggestion: None,
+            detecting: None,
             _observe: observe,
         };
         tab.refresh(state, true);
@@ -422,6 +428,13 @@ impl NoteyApp {
         if doc_changed {
             tab.version += 1;
             self.session_dirty = true;
+            if tab.doc.auto_language {
+                let id = tab.doc.id;
+                tab.detecting = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(languages::DETECT_DELAY).await;
+                    let _ = this.update(cx, |this, cx| this.detect_language(id, cx));
+                }));
+            }
         }
         if self.tabs.get(self.active).is_some_and(|t| t.view == *view) {
             self.find_editor_changed(was_open, cx);
@@ -561,6 +574,11 @@ impl NoteyApp {
                     self.tabs.clear();
                 }
                 let idx = self.add_tab(doc, text, cx);
+                // A file without an extension: the text decides.
+                if self.tabs[idx].doc.auto_language {
+                    let id = self.tabs[idx].doc.id;
+                    self.detect_language(id, cx);
+                }
                 self.scripting.queued.push(("buffer_opened".into(), Some(path.display().to_string())));
                 self.activate(idx, window, cx);
                 self.note_recent(&path);
@@ -645,6 +663,18 @@ impl NoteyApp {
             let Ok(Ok(Some(path))) = picked.await else { return false };
             this.update(cx, |this, cx| {
                 let Some(idx) = this.tab_index(id) else { return false };
+                // A name with an extension decides the file type, as when
+                // opening the file. Without one, the type follows the text.
+                let tab = &mut this.tabs[idx];
+                if path.extension().is_some() {
+                    let language = crate::syntax::detect(&path);
+                    tab.doc.auto_language = false;
+                    tab.suggestion = None;
+                    if tab.doc.language != language {
+                        tab.doc.language = language;
+                        this.reconfigure_tab(idx, cx);
+                    }
+                }
                 this.tabs[idx].doc.path = Some(path);
                 cx.notify();
                 this.write_tab(idx, cx)
@@ -672,6 +702,9 @@ impl NoteyApp {
                 (None, None) => continue,
             };
             doc.language = tab.language;
+            if let Some(auto) = tab.auto_language {
+                doc.auto_language = auto;
+            }
             self.add_tab(doc, text, cx);
         }
         if !self.tabs.is_empty() {
@@ -696,6 +729,7 @@ impl NoteyApp {
                 untitled_n: t.doc.untitled_n,
                 dirty_text: t.modified.then(|| text.to_string()),
                 language: t.doc.language.clone(),
+                auto_language: Some(t.doc.auto_language),
             });
         }
         Session { active, tabs }

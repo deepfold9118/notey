@@ -58,7 +58,9 @@ no session, so they prompt on close instead.
   Language plugins
 - **Syntax highlighting** (plugins) — one File Type plugin per language (45
   available), auto-detected by file extension with a filterable language
-  picker in the status bar
+  picker in the status bar. Untitled tabs and files without an extension
+  get their file type from their text, and the status bar offers the
+  matching plugin when it is not installed
 - **Themes** — built-in Notey Dark and Light themes plus imported VS Code
   color-theme JSON/JSONC and TextMate `.tmTheme` files; workbench colors apply
   across the full Notey interface and `tokenColors` drive syntax highlighting.

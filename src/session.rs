@@ -18,6 +18,9 @@ pub struct SessionTab {
     /// Manually chosen syntax (None = auto-detect / plain).
     #[serde(default)]
     pub language: Option<String>,
+    /// Whether the file type follows the text (None in older sessions).
+    #[serde(default)]
+    pub auto_language: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
