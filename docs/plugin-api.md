@@ -1,17 +1,42 @@
 # Notey Plugin API
 
-> **Implementation status (October 2026, API 3):** Rhai scripts are live
+> **Implementation status (November 2026, API 4):** Rhai scripts are live
 > in `src/plugins.rs`. They come from two places: your own scripts in
 > `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
 > Plugins window (see [`plugins/README.md`](../plugins/README.md)). The
-> official Markdown Tools, Word Count, Autocorrect and Export & Print
-> plugins in `plugins/features/` are working examples of everything below.
-> Not yet implemented: pos/line conversions, undo grouping,
-> encoding/line-ending setters, `confirm`/`prompt`/`form`/panels, the
-> `theme_changed` event, and the WASM tier.
+> official Markdown Tools, Word Count, Autocorrect, Export & Print and
+> Math plugins in `plugins/features/` are working examples of everything
+> below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
+> not as plugins of their own. Not yet implemented: pos/line conversions,
+> `begin_undo_group`/`end_undo_group` (`set_history` covers plugin
+> edits), encoding/line-ending setters, `confirm`/`prompt`/`form`/panels,
+> and the `theme_changed` event.
 >
 > **Scope note:** `notey` is available in every function of a script,
 > including your own helper functions.
+
+## API 4 additions (quick reference)
+
+| Call | Notes |
+|---|---|
+| `notey.editor.replace_ranges([#{ start, end, text }, ...])` | several replacements in offsets of the current text, applied exactly: the cursor, other cursors and text styles elsewhere stay put. A cursor inside or at the edge of a replaced range moves to the end of its new text, without scrolling |
+| `notey.editor.set_history(mode)` | how this run's edits go into undo: `"normal"` (own step, the default), `"join"` (part of the user's last undo step: results written after typing undo with it), `"skip"` (not undoable, like a change from elsewhere) |
+| `notey.wasm.run(file, func, value) -> value` | call a WebAssembly module in the plugin's folder (below). `value` goes in as JSON and the reply comes back as Rhai data |
+| `notey.net.fetch(url)` | download `url` (http or https) in the background into Notey's cache; needs `net`. A `net` event with `ev.url` follows when it is saved |
+| `notey.net.cached(url) -> String` | the cached download, or `""`; needs `net` |
+| `notey.net.age(url) -> int` | seconds since it was downloaded, or -1; needs `net` |
+
+**WebAssembly modules** run in the wasmi interpreter with no imports at
+all, so a module can only compute: no files, no network, no clock. Each
+call gets a fuel budget (a few seconds of work) and memory is capped at
+512 MB. A module stays loaded for the session, so it can keep state
+between calls; a trap or running out of fuel unloads it and reports an
+error. The calling convention, on the module's exported `memory`:
+`alloc(len: i32) -> i32` makes room for the input, `func(ptr: i32,
+len: i32) -> i64` takes the UTF-8 JSON input and returns `ptr << 32 | len`
+of the UTF-8 JSON output, and `dealloc(ptr: i32, len: i32)`, if exported,
+frees both. The official Math plugin (`plugins/features/feature-math`,
+engine in `crates/notey-math`) is an example.
 
 ## API 3 additions (quick reference)
 

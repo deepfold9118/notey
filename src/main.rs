@@ -25,6 +25,7 @@ mod theme;
 mod theme_import;
 mod theme_marketplace;
 mod update;
+mod wasm_host;
 
 use std::path::PathBuf;
 

@@ -5,11 +5,47 @@
 
 use std::time::{Duration, Instant};
 
-use codemirror_state::{ChangeSpec, EditorSelection};
+use codemirror_state::{ChangeSpec, EditorSelection, ADD_TO_HISTORY, TIME};
 use gpui::{ClipboardItem, KeyDownEvent};
 
 use super::*;
-use crate::plugins::{BufInfo, HostAction, PluginHost, ScriptCtx};
+use crate::plugins::{BufInfo, History, HostAction, PluginHost, ScriptCtx};
+
+/// The user event of plugin edits that join the user's typing in the
+/// undo history (see the editor's history config).
+pub(super) const PLUGIN_TYPING: &str = "input.type.plugin";
+
+/// The editor's undo history: plugin results written after typing
+/// (`set_history("join")`) undo together with the typing.
+pub(super) fn editor_history() -> codemirror_state::Extension {
+    codemirror_commands::history(codemirror_commands::HistoryConfig {
+        join_to_event: Some(std::sync::Arc::new(|tr, adjacent| adjacent || tr.is_user_event(PLUGIN_TYPING))),
+        ..codemirror_commands::HistoryConfig::default()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use codemirror_state::{ChangeSpec, EditorState, EditorStateConfig, TransactionSpec, TIME};
+
+    use super::{editor_history, PLUGIN_TYPING};
+
+    #[test]
+    fn plugin_results_undo_with_the_typing() {
+        let mut state = EditorState::create(EditorStateConfig::default().doc("2+2 ").extensions(editor_history()));
+        let typed = state.update(TransactionSpec::new().changes(ChangeSpec::insert(4, "=>")).user_event("input.type"));
+        state = typed.state().clone();
+        // the result arrives later, as Math writes it
+        let result = state.update(
+            TransactionSpec::new().changes(ChangeSpec::insert(6, " 4")).user_event(PLUGIN_TYPING).annotation(TIME.of(0.0)),
+        );
+        state = result.state().clone();
+        assert_eq!(state.doc().to_string(), "2+2 => 4");
+        let mut undone = None;
+        codemirror_commands::undo(&state, &mut |tr| undone = Some(tr.state().clone()));
+        assert_eq!(undone.unwrap().doc().to_string(), "2+2 ");
+    }
+}
 use crate::styles::{StyleChange, STYLE_RANGE};
 
 /// `text_changed` events come at most this often.
@@ -33,6 +69,8 @@ pub(super) struct Scripting {
     pub(super) pending_check: bool,
     /// Events to deliver after this render: (kind, path).
     pub(super) queued: Vec<(String, Option<String>)>,
+    /// Plugin downloads under way.
+    fetching: std::collections::HashSet<String>,
 }
 
 fn char_to_byte(s: &str, ci: usize) -> usize {
@@ -53,6 +91,7 @@ impl NoteyApp {
             .enabled(crate::packages::Kind::Feature)
             .filter_map(|p| Some((p.file(p.manifest.script.as_ref()?), p.manifest.capabilities.clone())))
             .collect();
+        crate::wasm_host::reset();
         self.scripting.host = PluginHost::load(&feature_scripts);
         if report {
             let n = self.scripting.host.scripts.len();
@@ -110,6 +149,7 @@ impl NoteyApp {
             script_name: String::new(),
             capabilities: Vec::new(),
             styles: Vec::new(),
+            ..ScriptCtx::default()
         })
     }
 
@@ -120,7 +160,31 @@ impl NoteyApp {
             view.update(cx, |view, cx| {
                 let mut spec = TransactionSpec::new();
                 let mut any = false;
-                if out.text_dirty {
+                let exact = out.exact.as_ref().filter(|(_, after)| *after == out.text).map(|(e, _)| e);
+                if let (true, Some(edits)) = (out.text_dirty, exact) {
+                    // replace_ranges: each edit on its own, so the cursor and
+                    // styles elsewhere stay put
+                    let old = view.state().doc().to_string();
+                    // the edits are in order, so one pass finds every offset
+                    let (mut at_char, mut at_byte) = (0usize, 0usize);
+                    let mut byte_of = |c: usize| {
+                        while at_char < c && at_byte < old.len() {
+                            at_byte += old[at_byte..].chars().next().map_or(1, char::len_utf8);
+                            at_char += 1;
+                        }
+                        at_byte
+                    };
+                    let mut specs = Vec::with_capacity(edits.len());
+                    for (a, b, t) in edits {
+                        let from = byte_of(*a);
+                        let to = byte_of(*b);
+                        specs.push(ChangeSpec::replace(from, to, t.clone()));
+                    }
+                    if !specs.is_empty() {
+                        spec = spec.changes(ChangeSpec::List(specs));
+                        any = true;
+                    }
+                } else if out.text_dirty {
                     // The smallest single replacement, so undo, scrolling and
                     // other cursors are disturbed as little as possible.
                     let old = view.state().doc().to_string();
@@ -137,13 +201,25 @@ impl NoteyApp {
                     }
                     if prefix + suffix != old.len() || prefix + suffix != new.len() {
                         let insert = new[prefix..new.len() - suffix].to_string();
-                        spec = spec.changes(ChangeSpec::replace(prefix, old.len() - suffix, insert)).user_event("input.plugin");
+                        spec = spec.changes(ChangeSpec::replace(prefix, old.len() - suffix, insert));
                         any = true;
                     }
                 }
+                if out.text_dirty {
+                    spec = match out.history {
+                        History::Normal => spec.user_event("input.plugin"),
+                        // joins the last typing step (the time is unknown, so
+                        // no group delay applies)
+                        History::Join => spec.user_event(PLUGIN_TYPING).annotation(TIME.of(0.0)),
+                        History::Skip => spec.user_event("input.plugin").annotation(ADD_TO_HISTORY.of(false)),
+                    };
+                }
                 if out.sel_dirty {
                     let (a, h) = (char_to_byte(&out.text, out.sel.0), char_to_byte(&out.text, out.sel.1));
-                    spec = spec.selection(EditorSelection::single(a, h)).scroll_into_view();
+                    spec = spec.selection(EditorSelection::single(a, h));
+                    if !out.sel_quiet {
+                        spec = spec.scroll_into_view();
+                    }
                     any = true;
                 }
                 // The style ops use offsets into the script's text, which is
@@ -217,7 +293,37 @@ impl NoteyApp {
                 }
             }
             HostAction::ClearStatusItem(key) => self.scripting.status_items.retain(|(k, _, _)| *k != key),
+            HostAction::Fetch(url) => self.plugin_fetch(url, window, cx),
         }
+    }
+
+    /// Download `url` for a plugin in the background, into the cache that
+    /// `notey.net.cached` reads, then deliver a `net` event.
+    fn plugin_fetch(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.scripting.fetching.insert(url.clone()) {
+            return;
+        }
+        let Some(path) = crate::plugins::net_cache_path(&url) else { return };
+        let source = url.clone();
+        let job = cx.background_executor().spawn(async move {
+            let body = crate::update::fetch(&source, 4 * 1024 * 1024)?;
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            let tmp = path.with_extension("part");
+            std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
+            std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = job.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.scripting.fetching.remove(&url);
+                if result.is_ok() {
+                    this.fire_event("net", Some(url), window, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// Run a plugin command on the active tab.
@@ -251,7 +357,11 @@ impl NoteyApp {
             event.insert("kind".into(), rhai::Dynamic::from(kind.to_string()));
             event.insert("buffer_id".into(), rhai::Dynamic::from(doc_id as i64));
             if let Some(p) = &payload {
-                let key = if kind == "input" { "text" } else { "path" };
+                let key = match kind {
+                    "input" => "text",
+                    "net" => "url",
+                    _ => "path",
+                };
                 event.insert(key.into(), rhai::Dynamic::from(p.clone()));
             }
             let out = self.scripting.host.run_event(idx, event, snapshot);

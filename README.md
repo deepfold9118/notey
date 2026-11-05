@@ -126,8 +126,11 @@ Notey keeps its core minimal; everything else is a plugin, managed from
 
 - **Features** — Spellcheck, Markdown Tools (Ctrl+B/I/E/K formatting, list
   continuation, rendered and side-by-side preview), Word Count, Autocorrect,
-  Text Color, and Export & Print (HTML export, formatted printing via your
-  browser).
+  Text Color, Export & Print (HTML export, formatted printing via your
+  browser), and Math (live math in any tab in the style of
+  [Calca](https://calca.io): `price * 3 =>` writes the result, with symbolic
+  algebra, solving, derivatives, matrices and currency conversion; see
+  [its README](plugins/features/feature-math/README.md)).
 - **Languages** — one spellcheck dictionary each (16 available: English
   variants, Spanish, French, German, Italian, Portuguese, Dutch, Polish,
   Swedish, Danish, Russian, Ukrainian). A word is accepted if any enabled
@@ -146,7 +149,9 @@ their commands appear in the Edit menu (Settings > Plugins > Reload Scripts
 loads the changes). See [docs/plugin-api.md](docs/plugin-api.md). Scripts can't
 touch files or the network unless they declare a permission, and a
 failing script can never corrupt the buffer: scripts edit a snapshot that
-is only applied when they finish.
+is only applied when they finish. For heavy work, a plugin can ship a
+WebAssembly module that runs sandboxed (the Math plugin's engine is
+[`crates/notey-math`](crates/notey-math), built with `cargo xtask math`).
 
 ## Installer
 

@@ -382,7 +382,7 @@ impl NoteyApp {
         let typed = Arc::new(std::sync::Mutex::new(String::new()));
         let typed_in = typed.clone();
         let extensions = Extension::list([
-            history(HistoryConfig::default()),
+            scripting::editor_history(),
             keymap(bindings),
             ALLOW_MULTIPLE_SELECTIONS.of(true),
             UPDATE_LISTENER.of(Arc::new(move |update: &codemirror_view::ViewUpdate| {
@@ -390,7 +390,7 @@ impl NoteyApp {
                     flag.store(true, Ordering::Relaxed);
                 }
                 for tr in &update.transactions {
-                    if tr.is_user_event("input.type") {
+                    if tr.is_user_event("input.type") && !tr.is_user_event(scripting::PLUGIN_TYPING) {
                         let mut typed = typed_in.lock().unwrap();
                         tr.changes().iter_changes(|_, _, _, _, text| typed.push_str(&text.to_string()), false);
                     }

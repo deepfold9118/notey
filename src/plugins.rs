@@ -20,12 +20,15 @@ use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope, AST};
 /// notey.fs (capability-gated), notey.app.open/temp_path.
 /// 3: command `menu`, `group`, `context` and `swatch`; text styles
 /// (`style_range`, `clear_styles`).
-pub const API_VERSION: i64 = 3;
+/// 4: `replace_ranges`, `set_history`, `notey.wasm.run`, `notey.net`
+/// (capability-gated) and the `net` event.
+pub const API_VERSION: i64 = 4;
 
 /// Permissions a script must declare (and, for installed plugins, the
 /// package must grant) before it can use the matching API.
 pub const CAP_FS_WRITE: &str = "fs.write";
 pub const CAP_OPEN: &str = "open";
+pub const CAP_NET: &str = "net";
 
 // ---------- host-visible results of a script run ----------
 
@@ -46,6 +49,8 @@ pub enum HostAction {
     /// Status bar item (key is unique per script): text, tooltip.
     SetStatusItem(String, String, String),
     ClearStatusItem(String),
+    /// Download a URL into the plugin cache; a `net` event follows.
+    Fetch(String),
 }
 
 /// Condition under which a command or key hook is active.
@@ -89,7 +94,23 @@ pub struct BufInfo {
     pub active: bool,
 }
 
+/// How a script's edits go into the undo history.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum History {
+    /// Its own undo step.
+    #[default]
+    Normal,
+    /// Part of the user's last undo step (results that follow typing).
+    Join,
+    /// Not undoable, like a change from elsewhere.
+    Skip,
+}
+
+/// Edits in char offsets of the original text, and the text they made.
+pub type ExactEdits = (Vec<(usize, usize, String)>, String);
+
 /// Snapshot the script reads and mutates.
+#[derive(Default)]
 pub struct ScriptCtx {
     pub text: String,
     pub sel: (usize, usize), // char offsets
@@ -108,6 +129,14 @@ pub struct ScriptCtx {
     pub capabilities: Vec<String>,
     /// Text styles to put on the active buffer, in sequence.
     pub styles: Vec<StyleOp>,
+    /// The running script's folder (where its WebAssembly modules are).
+    pub script_dir: PathBuf,
+    /// Edits from `replace_ranges` (char offsets in the original text) and
+    /// the text they made: applied exactly, if nothing else changed it.
+    pub exact: Option<ExactEdits>,
+    pub history: History,
+    /// The selection moved only because of edits: don't scroll to it.
+    pub sel_quiet: bool,
 }
 
 /// Set or clear the colors of a char range of the script's text.
@@ -416,6 +445,7 @@ fn join(parts, sep) {
         };
         ctx.script_name = name.clone();
         ctx.capabilities = self.scripts[script_idx].capabilities.clone();
+        ctx.script_dir = self.scripts[script_idx].path.parent().map(Path::to_path_buf).unwrap_or_default();
         let shared: Ctx = Rc::new(RefCell::new(ctx));
         let engine = api_engine(shared.clone()); // resolves `notey` (see on_var)
         let mut scope = Scope::new();
@@ -470,6 +500,10 @@ fn join(parts, sep) {
                     script_name: c.script_name.clone(),
                     capabilities: c.capabilities.clone(),
                     styles: std::mem::take(&mut c.styles),
+                    script_dir: c.script_dir.clone(),
+                    exact: c.exact.take(),
+                    history: c.history,
+                    sel_quiet: c.sel_quiet,
                 }
             }
         };
@@ -591,6 +625,67 @@ struct TextApi;
 #[derive(Clone)]
 struct FsApi {
     ctx: Ctx,
+}
+#[derive(Clone)]
+struct WasmApi {
+    ctx: Ctx,
+}
+#[derive(Clone)]
+struct NetApi {
+    ctx: Ctx,
+}
+
+/// A Rhai value as JSON (for WebAssembly modules).
+fn to_json(v: &Dynamic) -> serde_json::Value {
+    use serde_json::Value;
+    if v.is_unit() {
+        Value::Null
+    } else if let Ok(b) = v.as_bool() {
+        Value::Bool(b)
+    } else if let Ok(i) = v.as_int() {
+        Value::from(i)
+    } else if let Ok(f) = v.as_float() {
+        serde_json::Number::from_f64(f).map_or(Value::Null, Value::Number)
+    } else if let Some(s) = v.read_lock::<ImmutableString>() {
+        Value::String(s.to_string())
+    } else if let Some(a) = v.read_lock::<Array>() {
+        Value::Array(a.iter().map(to_json).collect())
+    } else if let Some(m) = v.read_lock::<Map>() {
+        Value::Object(m.iter().map(|(k, x)| (k.to_string(), to_json(x))).collect())
+    } else {
+        Value::String(v.to_string())
+    }
+}
+
+/// JSON as a Rhai value.
+fn from_json(v: serde_json::Value) -> Dynamic {
+    use serde_json::Value;
+    match v {
+        Value::Null => Dynamic::UNIT,
+        Value::Bool(b) => Dynamic::from(b),
+        Value::Number(n) => match n.as_i64() {
+            Some(i) => Dynamic::from(i),
+            None => Dynamic::from(n.as_f64().unwrap_or(0.0)),
+        },
+        Value::String(s) => Dynamic::from(ImmutableString::from(s)),
+        Value::Array(a) => Dynamic::from(a.into_iter().map(from_json).collect::<Array>()),
+        Value::Object(o) => Dynamic::from(o.into_iter().map(|(k, x)| (k.into(), from_json(x))).collect::<Map>()),
+    }
+}
+
+/// Where a plugin's download of `url` is cached.
+pub fn net_cache_path(url: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(url.as_bytes()).iter().take(16).map(|b| format!("{b:02x}")).collect();
+    crate::settings::data_dir().map(|d| d.join("net-cache").join(hash))
+}
+
+fn web_url(url: &str) -> ApiResult<()> {
+    if url.starts_with("https://") || url.starts_with("http://") {
+        Ok(())
+    } else {
+        Err("only http and https addresses can be fetched".into())
+    }
 }
 
 type ApiResult<T> = Result<T, Box<rhai::EvalAltResult>>;
@@ -806,6 +901,7 @@ fn api_engine(ctx: Ctx) -> Engine {
         let p = (pos.max(0) as usize).min(max);
         c.sel = (p, p);
         c.sel_dirty = true;
+        c.sel_quiet = false;
     });
     engine.register_fn("selection", |e: &mut EditorApi| -> Map {
         let c = e.ctx.borrow();
@@ -817,6 +913,7 @@ fn api_engine(ctx: Ctx) -> Engine {
         let (a, b) = map_range(&r, max);
         c.sel = (a, b);
         c.sel_dirty = true;
+        c.sel_quiet = false;
     });
     engine.register_fn("selection_or_all", |e: &mut EditorApi| -> Map {
         let c = e.ctx.borrow();
@@ -1128,6 +1225,119 @@ fn api_engine(ctx: Ctx) -> Engine {
         let dir = std::env::temp_dir().join("Notey");
         let _ = std::fs::create_dir_all(&dir);
         dir.join(safe.trim_start_matches('.')).display().to_string().into()
+    });
+
+    // ---- editor (API 4): exact edits and their undo history ----
+    engine.register_fn("replace_ranges", |e: &mut EditorApi, edits: Array| -> ApiResult<()> {
+        let mut c = e.ctx.borrow_mut();
+        let max = c.text.chars().count();
+        let mut list = Vec::with_capacity(edits.len());
+        for item in edits {
+            let m = item.try_cast::<Map>().ok_or("each edit must be a map #{ start, end, text }")?;
+            let (a, b) = map_range(&m, max);
+            let text = m.get("text").and_then(|t| t.clone().into_string().ok()).unwrap_or_default();
+            list.push((a.min(b), a.max(b), text));
+        }
+        list.sort_by_key(|x| x.0);
+        if list.windows(2).any(|w| w[0].1 > w[1].0) {
+            return Err("the edits overlap".into());
+        }
+        let fresh = !c.text_dirty;
+        // the selection: positions inside or at the edge of a replaced
+        // range move to the end of its new text, others shift
+        let map = |p: usize| -> usize {
+            let mut delta = 0isize;
+            for (a, b, t) in &list {
+                let n = t.chars().count() as isize;
+                if p < *a {
+                    break;
+                }
+                if p <= *b {
+                    return (*a as isize + delta + n) as usize;
+                }
+                delta += n - (*b - *a) as isize;
+            }
+            (p as isize + delta) as usize
+        };
+        let sel = (map(c.sel.0), map(c.sel.1));
+        let mut out = String::with_capacity(c.text.len());
+        let mut at = 0;
+        for (a, b, t) in &list {
+            let (ab, bb) = (char_to_byte(&c.text, *a), char_to_byte(&c.text, *b));
+            out.push_str(&c.text[at..ab]);
+            out.push_str(t);
+            at = bb;
+        }
+        out.push_str(&c.text[at..]);
+        c.text = out;
+        c.text_dirty = true;
+        c.exact = fresh.then(|| (list, c.text.clone()));
+        if sel != c.sel {
+            c.sel_quiet = !c.sel_dirty || c.sel_quiet;
+            c.sel = sel;
+            c.sel_dirty = true;
+        }
+        Ok(())
+    });
+    engine.register_fn("set_history", |e: &mut EditorApi, mode: ImmutableString| -> ApiResult<()> {
+        e.ctx.borrow_mut().history = match mode.as_str() {
+            "normal" => History::Normal,
+            "join" => History::Join,
+            "skip" => History::Skip,
+            m => return Err(format!("unknown history mode '{m}' (use \"normal\", \"join\" or \"skip\")").into()),
+        };
+        Ok(())
+    });
+
+    // ---- WebAssembly modules (API 4): pure computation, no permission ----
+    engine.register_type::<WasmApi>();
+    engine.register_get("wasm", |n: &mut NoteyApi| WasmApi { ctx: n.ctx.clone() });
+    engine.register_fn(
+        "run",
+        |w: &mut WasmApi, file: ImmutableString, func: ImmutableString, input: Dynamic| -> ApiResult<Dynamic> {
+            let rel = Path::new(file.as_str());
+            if !rel.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+                return Err("the module must be a file in the plugin's folder".into());
+            }
+            let path = w.ctx.borrow().script_dir.join(rel);
+            let json = to_json(&input).to_string();
+            let out = crate::wasm_host::call(&path, &func, &json).map_err(|e| format!("{file}: {e}"))?;
+            let value: serde_json::Value =
+                serde_json::from_str(&out).map_err(|e| format!("{file}: the reply is not JSON: {e}"))?;
+            Ok(from_json(value))
+        },
+    );
+
+    // ---- network (API 4, capability-gated): cached downloads ----
+    engine.register_type::<NetApi>();
+    engine.register_get("net", |n: &mut NoteyApi| NetApi { ctx: n.ctx.clone() });
+    engine.register_fn("cached", |n: &mut NetApi, url: ImmutableString| -> ApiResult<ImmutableString> {
+        if !n.ctx.borrow().has(CAP_NET) {
+            return Err(denied(CAP_NET));
+        }
+        web_url(&url)?;
+        Ok(net_cache_path(&url).and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default().into())
+    });
+    engine.register_fn("age", |n: &mut NetApi, url: ImmutableString| -> ApiResult<i64> {
+        if !n.ctx.borrow().has(CAP_NET) {
+            return Err(denied(CAP_NET));
+        }
+        web_url(&url)?;
+        let age = net_cache_path(&url)
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .map_or(-1, |d| d.as_secs() as i64);
+        Ok(age)
+    });
+    engine.register_fn("fetch", |n: &mut NetApi, url: ImmutableString| -> ApiResult<()> {
+        let mut c = n.ctx.borrow_mut();
+        if !c.has(CAP_NET) {
+            return Err(denied(CAP_NET));
+        }
+        web_url(&url)?;
+        c.actions.push(HostAction::Fetch(url.to_string()));
+        Ok(())
     });
 
     engine

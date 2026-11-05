@@ -43,6 +43,7 @@ fn ctx(text: &str, sel: (usize, usize), language: Option<&str>) -> ScriptCtx {
         script_name: String::new(),
         capabilities: Vec::new(),
         styles: Vec::new(),
+        ..ScriptCtx::default()
     }
 }
 
@@ -252,6 +253,51 @@ fn capabilities_must_be_granted_by_the_package() {
 }
 
 #[test]
+fn math_writes_results_as_exact_edits() {
+    let mut host = official("feature-math");
+    let doc = "price = 20\nprice * 3 =>\nMonday => call Bob";
+    let cursor = doc.find("=>").unwrap() + 2;
+    let out = host.run_event(0, event("text_changed", None), ctx(doc, (cursor, cursor), None));
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+    assert_eq!(out.text, "price = 20\nprice * 3 => 60\nMonday => call Bob");
+    let (edits, after) = out.exact.as_ref().expect("exact edits");
+    assert_eq!(after, &out.text);
+    assert_eq!(edits, &vec![(cursor, cursor, " 60".to_string())]);
+    // results after typing undo with it; the cursor moves past the result
+    // without scrolling
+    assert_eq!(out.history, History::Join);
+    assert_eq!(out.sel, (cursor + 3, cursor + 3));
+    assert!(out.sel_quiet);
+    // opening a tab updates results without an undo step of their own
+    let out = host.run_event(0, event("buffer_activated", None), ctx("2 + 2 => 5", (0, 0), None));
+    assert_eq!(out.text, "2 + 2 => 4");
+    assert_eq!(out.history, History::Skip);
+    assert_eq!(out.sel, (0, 0));
+}
+
+#[test]
+fn replace_ranges_maps_the_selection() {
+    let mut host = PluginHost { scripts: Vec::new(), errors: Vec::new() };
+    let dir = std::env::temp_dir().join(format!("notey-ranges-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.rhai");
+    std::fs::write(
+        &path,
+        "fn register() { #{ name: \"T\", min_api: 4, commands: [#{ id: \"go\" }] } }\n\
+         fn on_command(id) { notey.editor.replace_ranges([#{ start: 6, end: 7, text: \"XY\" }, #{ start: 0, end: 1, text: \"\" }]); }",
+    )
+    .unwrap();
+    host.scripts.push(PluginHost::load_script(&path, None).unwrap());
+    std::fs::remove_dir_all(&dir).unwrap();
+    // the cursor after the second edit shifts by both edits
+    let out = host.run_command(0, "go", ctx("abcdefghij", (9, 9), None));
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+    assert_eq!(out.text, "bcdefXYhij");
+    assert_eq!(out.sel, (9, 9));
+    assert_eq!(out.exact.unwrap().0, vec![(0, 1, String::new()), (6, 7, "XY".to_string())]);
+}
+
+#[test]
 fn legacy_markdown_script_is_recognized() {
     assert!(LEGACY_MARKDOWN_SCRIPT.contains("Markdown Preview"));
     let crlf = LEGACY_MARKDOWN_SCRIPT.replace('\n', "\r\n");
@@ -265,3 +311,4 @@ fn scripts_get_the_egui_key_names() {
     assert_eq!(crate::plugins::script_key_name("f5"), "F5");
     assert_eq!(crate::plugins::script_key_name("backspace"), "Backspace");
 }
+

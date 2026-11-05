@@ -54,12 +54,42 @@ fn main() {
     let result = match cmd.as_str() {
         "plugins" => build_plugins(),
         "index" => write_index(&repo_root()),
-        _ => Err("usage: cargo xtask <plugins|index>".into()),
+        "math" => build_math(&repo_root()),
+        _ => Err("usage: cargo xtask <plugins|index|math>".into()),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
+}
+
+/// Build the Math plugin's engine (crates/notey-math) to WebAssembly, put
+/// it in the plugin, and rewrite the index.
+fn build_math(root: &Path) -> Res<()> {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    // panic messages name source files: keep the builder's folders (and
+    // user name) out of the published module
+    let cargo_home = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| {
+        std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(|h| PathBuf::from(h).join(".cargo"))
+    });
+    let mut flags = format!("--remap-path-prefix={}=/notey", root.display());
+    if let Some(home) = cargo_home {
+        flags = format!("--remap-path-prefix={}=/cargo\x1f{flags}", home.display());
+    }
+    let status = std::process::Command::new(cargo)
+        .current_dir(root)
+        .env("CARGO_ENCODED_RUSTFLAGS", flags)
+        .args(["build", "--release", "-p", "notey-math", "--target", "wasm32-unknown-unknown"])
+        .status()
+        .map_err(|e| format!("cargo: {e}"))?;
+    if !status.success() {
+        return Err("the engine did not build (rustup target add wasm32-unknown-unknown)".into());
+    }
+    let built = root.join("target/wasm32-unknown-unknown/release/notey_math.wasm");
+    let dest = root.join("plugins/features/feature-math/math.wasm");
+    fs::copy(&built, &dest).map_err(|e| format!("{}: {e}", built.display()))?;
+    println!("wrote {}", dest.display());
+    write_index(root)
 }
 
 fn repo_root() -> PathBuf {

@@ -56,6 +56,36 @@
       "version": "2.0.0"
     },
     {
+      "capabilities": [
+        "net"
+      ],
+      "description": "Live math in any tab, like Calca: write => after a calculation and the result appears. Definitions, functions, equation solving, derivatives, matrices, complex numbers, and currency conversion with daily exchange rates.",
+      "dir": "features/feature-math",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "e8647e44ddbac57564404f7ffe03ddb42a74ad1922a0af78d87814fce3d3f687",
+          "size": 2412
+        },
+        {
+          "path": "math.wasm",
+          "sha256": "85944cc81da6cbd888c4135bb9706245c51adcf61ce7eba68f0595bbbdd9e447",
+          "size": 539924
+        },
+        {
+          "path": "README.md",
+          "sha256": "f8fd17a32000d15e816b68cb156c0fed26943a7b977b3211cfd5c4d7ba56bde1",
+          "size": 3930
+        }
+      ],
+      "id": "feature-math",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Math",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
       "description": "Underlines misspelled words and suggests corrections. Checks against every installed and enabled language from the Languages tab.",
       "dir": "features/feature-spellcheck",
       "files": [

@@ -37,7 +37,7 @@ fn is_url(s: &str) -> bool {
 }
 
 /// Read a URL or a local file, up to `limit` bytes.
-fn fetch(source: &str, limit: u64) -> Result<Vec<u8>, String> {
+pub fn fetch(source: &str, limit: u64) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     if is_url(source) {
         let client = reqwest::blocking::Client::builder()

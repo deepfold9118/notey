@@ -1,0 +1,11 @@
+{
+  "id": "feature-math",
+  "kind": "feature",
+  "name": "Math",
+  "version": "1.0.0",
+  "description": "Live math in any tab, like Calca: write => after a calculation and the result appears. Definitions, functions, equation solving, derivatives, matrices, complex numbers, and currency conversion with daily exchange rates.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "capabilities": ["net"],
+  "files": ["main.rhai", "math.wasm", "README.md"]
+}

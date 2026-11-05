@@ -6,6 +6,28 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Math, a new Feature plugin: live math in any tab, in the style of
+  Calca. Write `=>` after a calculation and the result appears after it,
+  updated as you type. It has definitions and functions, names of several
+  words, symbolic algebra (`y * (1 + 10%) => 1.1y`), solving for an
+  undefined variable, derivatives, Taylor series and Jacobians, matrices,
+  ranges, map/reduce/sum/prod, complex numbers, logic, hexadecimal and
+  binary numbers, heading-scoped definitions and number cultures. Money is
+  a unit (`$20`, `100 EUR`) and converts with `in` (`100 USD in EUR`),
+  using the European Central Bank's daily rates. In plain text and
+  Markdown it writes only results that say something new, and in code
+  files only plain values after an empty `=>`, so ordinary `=>` arrows are
+  left alone. Results written while typing undo with the typing.
+- Plugin API 4: `notey.wasm.run` runs a sandboxed WebAssembly module that
+  a plugin ships (no imports, a fuel budget, capped memory);
+  `notey.net.fetch`, `cached` and `age` download into a cache, behind the
+  new `net` permission, with a `net` event when a download finishes;
+  `notey.editor.replace_ranges` applies several edits exactly, keeping the
+  cursor and text styles elsewhere in place; and
+  `notey.editor.set_history` makes a script's edits join the last undo
+  step or stay out of the undo history.
+
 ## [0.8.8] - 2026-11-05
 
 ### Added

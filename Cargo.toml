@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "xtask"]
+members = [".", "xtask", "crates/notey-math"]
 
 [package]
 name = "notey"
@@ -35,6 +35,7 @@ sha2 = "0.10"
 spellbook = "0.4"
 syntect = { version = "5", default-features = false, features = ["parsing", "default-themes", "plist-load", "yaml-load", "dump-load", "dump-create", "regex-fancy"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+wasmi = { version = "2", default-features = false, features = ["std", "stable", "validate", "portable-dispatch"] }
 
 [target.'cfg(windows)'.dependencies]
 accesskit_windows = "0.32"
