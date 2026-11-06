@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-06
+
+### Fixed
+- Settings scrolls all the way to the end. In Settings > Plugins, the last
+  plugins could not be reached when their descriptions took more than one
+  line.
+
 ## [0.12.0] - 2026-11-06
 
 ### Added
@@ -444,7 +451,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/deepfold9118/notey/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/deepfold9118/notey/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/deepfold9118/notey/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/deepfold9118/notey/compare/v0.10.0...v0.10.1

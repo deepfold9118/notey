@@ -37,6 +37,9 @@ impl Section {
     }
 }
 
+/// The width of the section list.
+const NAV_W: f32 = 200.;
+
 /// The Settings tab's own state.
 pub(super) struct SettingsUi {
     pub(super) section: Section,
@@ -97,7 +100,7 @@ impl NoteyApp {
     pub(super) fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let nav = div()
-            .w(px(200.))
+            .w(px(NAV_W))
             .flex_none()
             .p_2()
             .flex()
@@ -153,6 +156,9 @@ impl NoteyApp {
                 self.text_button("reset-settings", "Reset to defaults")
                     .on_click(cx.listener(|this, _, _, cx| this.reset_settings(cx))),
             );
+        // the room beside the navigation (and the tab list on the left)
+        let left = if self.settings.tabs_left { self.settings.tabs_left_width + 1. } else { 0. };
+        let content_w = (f32::from(window.viewport_size().width) - NAV_W - left).clamp(0., 760.);
         let section = self.settings_ui.section;
         let content = match section {
             Section::Editor => self.settings_editor(cx),
@@ -167,9 +173,12 @@ impl NoteyApp {
             s => s.label().into(),
         };
         div().flex_1().min_h_0().flex().bg(p.editor).child(nav).child(
-            div().id("settings-content").flex_1().min_w_0().overflow_y_scroll().child(
+            div().id("settings-content").flex_1().min_w_0().flex().flex_col().overflow_y_scroll().child(
+                // A definite width (not max_w), so that the column's height
+                // comes from text wrapped at the width it is drawn at, and
+                // the scroll reaches the last row.
                 div()
-                    .max_w(px(760.))
+                    .w(px(content_w))
                     .px_8()
                     .py_6()
                     .flex()
