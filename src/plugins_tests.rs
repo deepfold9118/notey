@@ -162,6 +162,21 @@ fn word_count_sets_a_status_item() {
 }
 
 #[test]
+fn tab_colors_go_in_the_tab_menu_and_color_the_tab() {
+    let mut host = official("feature-tab-colors");
+    let cmds = &host.scripts[0].commands;
+    assert_eq!(cmds.len(), 7);
+    assert!(cmds.iter().all(|c| c.menu == crate::plugins::TAB_MENU && c.group.as_deref() == Some("Color")));
+    assert_eq!(cmds[4].swatch.as_deref(), Some("blue"));
+    let out = host.run_command(0, "blue", ctx("", (0, 0), None));
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+    assert!(matches!(out.actions.as_slice(), [HostAction::SetTabColor(Some(c))] if c == "blue"));
+    assert_eq!(out.tab_color, "blue");
+    let out = host.run_command(0, "none", ctx("", (0, 0), None));
+    assert!(matches!(out.actions.as_slice(), [HostAction::SetTabColor(None)]));
+}
+
+#[test]
 fn text_color_registers_menus_and_styles_the_selection() {
     use crate::styles::Change;
     let mut host = official("feature-text-color");
@@ -172,7 +187,7 @@ fn text_color_registers_menus_and_styles_the_selection() {
     assert_eq!(red.menu, "Format");
     assert_eq!(red.group.as_deref(), Some("Text Color"));
     assert!(red.context);
-    assert_eq!(red.swatch, parse_color("#cd3131"));
+    assert_eq!(red.swatch.as_deref(), Some("#cd3131"));
 
     let out = host.run_command(0, "fg:1", ctx("one two", (4, 7), None));
     assert!(host.errors.is_empty(), "{:?}", host.errors);

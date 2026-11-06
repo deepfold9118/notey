@@ -99,6 +99,9 @@ pub fn load_vscode_theme(path: &Path) -> Result<ImportedTheme, String> {
     );
     p.find_match = pick(&["editor.findMatchHighlightBackground"], base.find_match);
     p.find_match_selected = pick(&["editor.findMatchBackground"], base.find_match_selected);
+    for (i, key) in crate::theme::COLOR_KEYS.iter().enumerate() {
+        p.named[i] = pick(&[key], base.named[i]);
+    }
     // The theme's own cursor color; the accent (focus borders, badges) is
     // often too dim or too close to the editor background to find a caret.
     let theme_caret =

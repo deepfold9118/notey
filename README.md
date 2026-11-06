@@ -54,7 +54,10 @@ no session, so they prompt on close instead.
 - **Tabs** — Ctrl+N new tab, Ctrl+W close, Ctrl+Tab / Ctrl+Shift+Tab to switch,
   middle-click a tab to close it, unsaved-changes prompt on close. The tabs
   can be in the title bar or in a vertical list on the left (Settings >
-  Appearance > Tabs).
+  Appearance > Tabs). Right-click a tab to pin it (pinned tabs stay and
+  come back every time), color it (Tab Colors plugin, in the theme's
+  colors), or close the tabs around it.
+- **Split view** (View > Split View, `Ctrl+\`): two tabs side by side
 - **Spellchecker** (plugin) — red underline on misspelled words; right-click
   a word for suggestions or "Add to dictionary"; dictionaries come from
   Language plugins
@@ -128,8 +131,8 @@ Notey keeps its core minimal; everything else is a plugin, managed from
 
 - **Features** — Spellcheck, Markdown Tools (Ctrl+B/I/E/K formatting, list
   continuation, rendered and side-by-side preview), Word Count, Autocorrect,
-  Text Color, Export & Print (HTML export, formatted printing via your
-  browser), and Math (live math in any tab in the style of
+  Text Color, Tab Colors, Export & Print (HTML export, formatted printing
+  via your browser), and Math (live math in any tab in the style of
   [Calca](https://calca.io): `price * 3 =>` writes the result, with symbolic
   algebra, solving, derivatives, matrices and currency conversion; see
   [its README](plugins/features/feature-math/README.md)).
@@ -143,8 +146,8 @@ Notey keeps its core minimal; everything else is a plugin, managed from
 
 Official plugins download from this repo's [`plugins/`](plugins/) folder
 and are checksum-verified before install. The installer includes a default
-set (Spellcheck, English (US), Markdown Tools, Word Count, and common file
-types), so everything works offline out of the box.
+set (Spellcheck, English (US), Markdown Tools, Word Count, Tab Colors, and
+common file types), so everything works offline out of the box.
 
 You can also write your own Rhai scripts in `%APPDATA%\Notey\scripts`;
 their commands appear in the Edit menu (Settings > Plugins > Reload Scripts

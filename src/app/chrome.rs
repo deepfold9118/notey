@@ -19,7 +19,7 @@ const CAPTION_W: f32 = 46.0;
 const ICON_W: f32 = 44.0;
 /// The width of the menu bar's buttons, for telling a click on them apart
 /// from a click elsewhere.
-const MENU_BAR_W: f32 = 200.0;
+const MENU_BAR_W: f32 = 260.0;
 
 /// The element ids of a menu's panel and of its submenus' panels, by level.
 const PANEL_IDS: [&str; 4] = ["menu", "submenu", "submenu2", "submenu3"];
@@ -37,8 +37,9 @@ static ICON: LazyLock<Arc<Image>> =
 pub enum Menu {
     File,
     Edit,
+    View,
     Help,
-    /// All three, from the title-bar icon when the menu bar is hidden.
+    /// All of them, from the title-bar icon when the menu bar is hidden.
     All,
     Encoding,
     LineEnding,
@@ -46,6 +47,8 @@ pub enum Menu {
     Language,
     /// The editor's right-click menu.
     Context,
+    /// A tab's right-click menu.
+    Tab,
 }
 
 pub(super) type Choose = Rc<dyn Fn(&mut NoteyApp, &mut Window, &mut Context<NoteyApp>)>;
@@ -64,11 +67,23 @@ pub(super) enum Item {
         enabled: bool,
         script: usize,
         cmd: String,
+        /// The tab the command acts on, for the tab menu's commands.
+        target: Option<u64>,
         /// The script behind the command, for the tooltip.
         source: SharedString,
     },
     /// A submenu (a plugin command group).
     Submenu { label: SharedString, items: Vec<Item> },
+}
+
+/// How a tab looks besides its title.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TabLook {
+    pub(super) color: Option<gpui::Hsla>,
+    /// Its file is not on disk.
+    pub(super) missing: bool,
+    /// It is in the pane without focus (split view).
+    pub(super) other_pane: bool,
 }
 
 pub(super) fn action(label: &'static str, shortcut: &'static str, action: impl Action) -> Item {
@@ -121,14 +136,27 @@ impl NoteyApp {
                     sep.into_iter().chain(items)
                 }))
                 .collect(),
+            Menu::View => vec![
+                if self.split.is_some() {
+                    action("Close Split View", "Ctrl+\\", super::tabs::ToggleSplit)
+                } else {
+                    action("Split View", "Ctrl+\\", super::tabs::ToggleSplit)
+                },
+                Item::Separator,
+                action("Zoom In", "Ctrl+Plus", ZoomIn),
+                action("Zoom Out", "Ctrl+Minus", ZoomOut),
+                action("Reset Zoom", "Ctrl+0", ZoomReset),
+            ],
             Menu::Help => vec![action("Check for Updates...", "", CheckForUpdates), action("About Notey", "", About)],
             Menu::Context => self.context_menu_items(),
+            Menu::Tab => self.tab_menu_items(),
             // A submenu for each menu of the menu bar, and for the commands
             // of each plugin menu.
             Menu::All => {
                 let mut items = vec![
                     Item::Submenu { label: "File".into(), items: self.menu_items(Menu::File) },
                     Item::Submenu { label: "Edit".into(), items: self.edit_items() },
+                    Item::Submenu { label: "View".into(), items: self.menu_items(Menu::View) },
                 ];
                 for menu in crate::plugins::MENUS {
                     let commands = self.plugin_items(Some(menu));
@@ -218,7 +246,7 @@ impl NoteyApp {
     }
 
     /// Close the open menu and its submenus.
-    fn close_menus(&mut self) {
+    pub(super) fn close_menus(&mut self) {
         self.open_menu = None;
         self.open_submenus.clear();
         self.submenu_hovered = 0;
@@ -246,8 +274,15 @@ impl NoteyApp {
     /// with `None`, the commands for the editor's right-click menu. Commands
     /// with a group go in a submenu, before the other commands.
     pub(super) fn plugin_items(&self, menu: Option<&str>) -> Vec<Item> {
+        self.plugin_items_for(menu, None)
+    }
+
+    /// The plugin commands for `menu`, acting on the tab `target` (or the
+    /// active tab).
+    pub(super) fn plugin_items_for(&self, menu: Option<&str>, target: Option<u64>) -> Vec<Item> {
         let scripts = &self.scripting.host.scripts;
-        let language = self.tabs.get(self.active).and_then(|t| t.doc.language.clone());
+        let tab = target.and_then(|id| self.tab_index(id)).unwrap_or(self.active);
+        let language = self.tabs.get(tab).and_then(|t| t.doc.language.clone());
         let wanted = |c: &crate::plugins::PluginCommand| match menu {
             Some(m) => c.menu == m,
             None => c.context,
@@ -255,11 +290,12 @@ impl NoteyApp {
         let item = |i: usize, c: &crate::plugins::PluginCommand| Item::Plugin {
             label: c.title.clone().into(),
             shortcut: c.shortcut_text.clone().into(),
-            swatch: c.swatch,
+            swatch: c.swatch.as_deref().and_then(|s| self.palette.color(s)),
             // Focus conditions do not apply to menu clicks.
             enabled: c.when.matches(language.as_deref(), true),
             script: i,
             cmd: c.id.clone(),
+            target,
             source: format!("{} \u{2014} {}", scripts[i].name, scripts[i].path.display()).into(),
         };
         let mut groups: Vec<String> = Vec::new();
@@ -335,7 +371,7 @@ impl NoteyApp {
                     .hover(|s| s.bg(p.control_hover))
             };
             match item {
-                Item::Plugin { label, shortcut, swatch, enabled, script, cmd, source } => row()
+                Item::Plugin { label, shortcut, swatch, enabled, script, cmd, target, source } => row()
                     .tooltip(crate::prompt::tooltip(source))
                     .on_hover(Self::close_deeper(level, cx))
                     .justify_between()
@@ -355,7 +391,7 @@ impl NoteyApp {
                         d.on_click(cx.listener(move |this, _, window, cx| {
                             this.close_menus();
                             this.focus_active(window, cx);
-                            this.run_plugin_command(script, &cmd, window, cx);
+                            this.run_plugin_command(script, &cmd, target, window, cx);
                             cx.notify();
                         }))
                     })
@@ -472,23 +508,23 @@ impl NoteyApp {
         for (i, tab) in self.tabs.iter().enumerate() {
             let active = !self.settings_active && i == self.active;
             let title: SharedString = tab.doc.title().into();
+            let look = self.tab_look(tab);
+            let pinned = tab.pinned;
             tabs.push(
-                self.tab_element(("tab", i), title, tab.modified, active, cx)
+                self.tab_element(("tab", i), title, tab.modified, active, look, cx)
                     .on_click(cx.listener(move |this, _, window, cx| this.activate(i, window, cx)))
                     .on_mouse_down(
                         MouseButton::Middle,
                         cx.listener(move |this, _, window, cx| this.request_close_tab(i, window, cx)),
                     )
-                    .child(self.tab_close(("close", i), cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.request_close_tab(i, window, cx)
-                    })))
+                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, e, _, cx| this.open_tab_menu(i, e, cx)))
+                    .child(self.tab_button(("close", i), pinned, cx))
                     .into_any_element(),
             );
         }
         if self.settings_open {
             tabs.push(
-                self.tab_element("settings-tab", "Settings".into(), false, self.settings_active, cx)
+                self.tab_element("settings-tab", "Settings".into(), false, self.settings_active, TabLook::default(), cx)
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)))
                     .child(self.tab_close("settings-close", cx.listener(|this, _, window, cx| {
                         cx.stop_propagation();
@@ -554,17 +590,62 @@ impl NoteyApp {
             )
     }
 
+    /// How a tab looks besides its title: pinned, colored, a missing file,
+    /// shown in the other pane of the split view.
+    pub(super) fn tab_look(&self, tab: &Tab) -> TabLook {
+        TabLook {
+            color: tab.color.as_deref().and_then(|c| self.palette.color(c)),
+            missing: tab.missing(),
+            other_pane: self.split.as_ref().is_some_and(|s| s.other == tab.doc.id),
+        }
+    }
+
+    /// A tab's close button, or for a pinned tab, the pin that unpins it.
+    fn tab_button(&self, id: (&'static str, usize), pinned: bool, cx: &mut Context<Self>) -> AnyElement {
+        let i = id.1;
+        if pinned {
+            let p = self.palette;
+            return div()
+                .id(id)
+                .size(px(22.))
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .rounded(px(4.))
+                .font_family(self.icon_font.clone())
+                .text_size(px(11.))
+                .hover(|s| s.bg(p.control_hover))
+                .child("\u{E840}")
+                .tooltip(crate::prompt::tooltip("Pinned (click to unpin)"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(id) = this.tabs.get(i).map(|t| t.doc.id) {
+                        this.set_pinned(id, false, cx);
+                    }
+                }))
+                .into_any_element();
+        }
+        self.tab_close(id, cx.listener(move |this, _, window, cx| {
+            cx.stop_propagation();
+            this.request_close_tab(i, window, cx)
+        }))
+        .into_any_element()
+    }
+
     fn tab_element(
         &self,
         id: impl Into<gpui::ElementId>,
         title: SharedString,
         modified: bool,
         active: bool,
+        look: TabLook,
         _cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
         div()
             .id(id)
+            .relative()
             .h(px(32.))
             .min_w(px(80.))
             .max_w(px(220.))
@@ -576,9 +657,22 @@ impl NoteyApp {
             .gap_2()
             .rounded_t(px(6.))
             .when(active, |d| d.bg(p.editor))
+            .when(!active && look.other_pane, |d| d.bg(p.tab_hover))
             .when(!active, |d| d.text_color(p.text_weak).hover(|s| s.bg(p.tab_hover)))
+            .when_some(look.color, |d, c| {
+                d.child(div().absolute().top_0().left(px(6.)).right(px(6.)).h(px(3.)).rounded_b(px(2.)).bg(c))
+            })
             .when(modified, |d| d.child(div().flex_none().text_color(p.accent).child("●")))
-            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(title))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .when(look.missing, |d| d.italic().text_color(p.text_weak))
+                    .child(title),
+            )
     }
 
     fn tab_close(
@@ -637,6 +731,7 @@ impl NoteyApp {
             .px_1()
             .child(button(Menu::File, "File"))
             .child(button(Menu::Edit, "Edit"))
+            .child(button(Menu::View, "View"))
             .child(button(Menu::Help, "Help"))
     }
 
@@ -783,10 +878,17 @@ impl NoteyApp {
     /// The tabs as a vertical list on the left (Settings > Appearance > Tabs).
     pub(super) fn left_tab_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        let entry = |id: gpui::ElementId, group: SharedString, title: SharedString, modified: bool, active: bool, gear: bool| {
+        let entry = |id: gpui::ElementId,
+                     group: SharedString,
+                     title: SharedString,
+                     modified: bool,
+                     active: bool,
+                     gear: bool,
+                     look: TabLook| {
             div()
                 .id(id)
                 .group(group.clone())
+                .relative()
                 .h(px(26.))
                 .pl_2()
                 .pr_1()
@@ -796,24 +898,38 @@ impl NoteyApp {
                 .gap_2()
                 .rounded(px(4.))
                 .when(active, |d| d.bg(p.control_active))
+                .when(!active && look.other_pane, |d| d.bg(p.tab_hover))
                 .when(!active, |d| d.text_color(p.text_weak).hover(|s| s.bg(p.tab_hover)))
+                .when_some(look.color, |d, c| {
+                    d.child(div().absolute().left_0().top(px(5.)).bottom(px(5.)).w(px(3.)).rounded(px(2.)).bg(c))
+                })
                 .when(gear, |d| d.child(div().font_family(self.icon_font.clone()).text_size(px(11.)).child("\u{E713}")))
                 .when(modified, |d| d.child(div().flex_none().text_color(p.accent).child("●")))
-                .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(title))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .when(look.missing, |d| d.italic().text_color(p.text_weak))
+                        .child(title),
+                )
         };
         let mut list = div().id("tab-list").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_0p5();
         for (i, tab) in self.tabs.iter().enumerate() {
             let group: SharedString = format!("left-tab-{i}").into();
             let active = !self.settings_active && i == self.active;
-            let close = self.tab_close(("left-close", i), cx.listener(move |this, _, window, cx| {
-                cx.stop_propagation();
-                this.request_close_tab(i, window, cx)
-            }));
+            let close = self.tab_button(("left-close", i), tab.pinned, cx);
+            // The pin always shows; a close button only on hover.
+            let hide = !active && !tab.pinned;
+            let look = self.tab_look(tab);
             list = list.child(
-                entry(("left-tab", i).into(), group.clone(), tab.doc.title().into(), tab.modified, active, false)
-                    .child(div().when(!active, |d| d.invisible().group_hover(group, |s| s.visible())).child(close))
+                entry(("left-tab", i).into(), group.clone(), tab.doc.title().into(), tab.modified, active, false, look)
+                    .child(div().when(hide, |d| d.invisible().group_hover(group, |s| s.visible())).child(close))
                     .on_click(cx.listener(move |this, _, window, cx| this.activate(i, window, cx)))
-                    .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| this.request_close_tab(i, window, cx))),
+                    .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| this.request_close_tab(i, window, cx)))
+                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, e, _, cx| this.open_tab_menu(i, e, cx))),
             );
         }
         if self.settings_open {
@@ -822,7 +938,15 @@ impl NoteyApp {
                 this.close_settings(window, cx)
             }));
             list = list.child(
-                entry("left-settings".into(), "left-settings".into(), "Settings".into(), false, self.settings_active, true)
+                entry(
+                    "left-settings".into(),
+                    "left-settings".into(),
+                    "Settings".into(),
+                    false,
+                    self.settings_active,
+                    true,
+                    TabLook::default(),
+                )
                     .child(close)
                     .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             );
@@ -945,10 +1069,10 @@ impl NoteyApp {
                 choose(self, window, cx);
                 self.focus_active(window, cx);
             }
-            Item::Plugin { script, cmd, enabled: true, .. } => {
+            Item::Plugin { script, cmd, enabled: true, target, .. } => {
                 self.close_menus();
                 self.focus_active(window, cx);
-                self.run_plugin_command(script, &cmd, window, cx);
+                self.run_plugin_command(script, &cmd, target, window, cx);
             }
             Item::Submenu { label, .. } => {
                 if self.open_submenus.get(level) == Some(&label) {

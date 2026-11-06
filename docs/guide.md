@@ -22,9 +22,39 @@ tab asks whether to save it.
 
 - Ctrl+N opens a new tab, Ctrl+W closes one, and Ctrl+Tab /
   Ctrl+Shift+Tab switch between them. Middle-click a tab to close it.
-- File > New Window opens a separate window.
+- File > New Window opens a separate window. Extra windows are for quick,
+  temporary work: they don't keep a session, so they ask to save when
+  they close.
 - The tabs can be in the title bar or in a list on the left
   (Settings > Appearance > Tabs).
+- Right-click a tab for its menu: pin it, give it a color, open it in
+  split view, close it or the tabs around it, copy its path, or show it in
+  File Explorer.
+
+### Pinned tabs
+
+Pin a tab (right-click > Pin Tab) to keep it open: pinned tabs move to the
+front, show a pin in place of the close button, and come back every time
+Notey starts. To close one, unpin it first by clicking its pin. If a
+pinned file is missing when Notey starts, for example on a network share
+that is offline, its tab stays, shown in italics, and the file loads when
+it is back. Pinning is for the main window.
+
+### Tab colors
+
+With the Tab Colors plugin (installed by default), right-click a tab and
+pick a color from Color. The color shows as a stripe on the tab. The
+colors come from the theme, so they always match it, and a file keeps its
+color the next time it opens.
+
+## Split view
+
+View > Split View (`Ctrl+\`) shows two tabs side by side; right-click a tab
+and choose Open in Split View to pick which one goes beside the current
+tab. Click in a pane to work in it. Clicking a tab shows it in the pane
+you are working in, and the tab shown in the other pane is highlighted in
+the tab strip. Drag the line between the panes to resize them. View >
+Close Split View goes back to one pane.
 
 ## Search
 
@@ -46,7 +76,7 @@ tab asks whether to save it.
 - Alt+Up/Down moves lines, Tab and Shift+Tab indent and outdent the
   selected lines, and Ctrl+Backspace / Ctrl+Delete delete by word.
 - F5 inserts the time and date.
-- Zoom with Ctrl+Plus, Ctrl+Minus and Ctrl+0.
+- Zoom with Ctrl+Plus, Ctrl+Minus and Ctrl+0 (also in the View menu).
 - Large files stay fast: Notey lays out only the lines you can see.
 
 ## Files
@@ -80,7 +110,7 @@ Settings > Plugins:
 
 - **Features**: Spellcheck, Markdown Tools (formatting shortcuts, list
   continuation and a rendered preview), Word Count, Autocorrect, Text
-  Color, Export & Print, and
+  Color, Tab Colors, Export & Print, and
   [Math](https://github.com/deepfold9118/notey/blob/main/plugins/features/feature-math/README.md).
 - **Languages**: spellcheck dictionaries for 16 languages. A word is
   accepted if any enabled language knows it. Right-click a misspelled word
@@ -89,8 +119,8 @@ Settings > Plugins:
   type from the file extension or, for new tabs, from the text. When a file
   needs a plugin you don't have, the status bar offers it.
 
-The installer includes Spellcheck, English (US), Markdown Tools, Word Count
-and common file types, so Notey works offline out of the box. Plugins are
+The installer includes Spellcheck, English (US), Markdown Tools, Word Count,
+Tab Colors and common file types, so Notey works offline out of the box. Plugins are
 checksum-verified before they install.
 
 ### Math

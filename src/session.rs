@@ -21,12 +21,30 @@ pub struct SessionTab {
     /// Whether the file type follows the text (None in older sessions).
     #[serde(default)]
     pub auto_language: Option<bool>,
+    /// Pinned tabs come first and can't be closed.
+    #[serde(default)]
+    pub pinned: bool,
+    /// The tab's color ("#rrggbb").
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// Split view: the tab in the pane without focus.
+#[derive(Serialize, Deserialize)]
+pub struct SessionSplit {
+    /// Its index in `tabs`.
+    pub other: usize,
+    pub other_left: bool,
+    /// The left pane's share of the width.
+    pub ratio: f32,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Session {
     pub active: usize,
     pub tabs: Vec<SessionTab>,
+    #[serde(default)]
+    pub split: Option<SessionSplit>,
 }
 
 fn session_file() -> Option<PathBuf> {

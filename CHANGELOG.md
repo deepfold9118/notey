@@ -6,6 +6,29 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Tabs have a right-click menu: Pin Tab, Color, Open in Split View, Close
+  Tab, Close Other Tabs, Close Tabs to the Right, Copy Path and Show in
+  File Explorer.
+- Pinned tabs, in the main window: they move to the front with a pin in
+  place of the close button, and can't be closed until they are unpinned
+  (click the pin). They come back every time Notey starts; a pinned file
+  that is missing, such as one on a network share that is offline, keeps
+  its tab, shown in italics, and loads when the file is back.
+- Split view (View > Split View, `Ctrl+\`, or Open in Split View on a tab):
+  two tabs side by side. Click a pane to work in it; clicking a tab shows
+  it in the pane you are working in. Drag the divider to resize the panes.
+  The split view is kept in the session.
+- A View menu, with Split View and the zoom commands.
+- Tab Colors, a new Feature plugin, installed by default: right-click a
+  tab and pick a color from Color. The colors come from the theme (a VS
+  Code theme's terminal colors), so they match whichever theme is in use.
+  A file keeps its color the next time it opens.
+- Plugin API 5: commands in the tab right-click menu (`menu: "Tab"`), which
+  run on the right-clicked tab; `notey.editor.tab_color` and
+  `set_tab_color`; and color names (`red`, `blue`, ...) that follow the
+  theme, for tab colors and menu swatches.
+
 ## [0.9.0] - 2026-11-05
 
 ### Added

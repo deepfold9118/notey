@@ -61,6 +61,8 @@ pub struct Settings {
     pub skipped_version: Option<String>,
     /// When Notey last looked for a release, in seconds since 1970.
     pub last_update_check: i64,
+    /// Tab colors of files ("#rrggbb"), by path, set by a plugin.
+    pub tab_colors: std::collections::BTreeMap<String, String>,
 }
 
 /// A window position and size, in logical pixels.
@@ -98,6 +100,7 @@ impl Default for Settings {
             check_updates: true,
             skipped_version: None,
             last_update_check: 0,
+            tab_colors: Default::default(),
         }
     }
 }

@@ -35,6 +35,36 @@ pub struct Palette {
     pub find_match: Hsla,
     /// The selected find match.
     pub find_match_selected: Hsla,
+    /// The named colors (`COLOR_NAMES`): a VS Code theme's terminal colors.
+    pub named: [Hsla; 6],
+}
+
+/// Colors that plugins can name (tab colors, swatches), so that they follow
+/// the theme: the theme's terminal colors.
+pub const COLOR_NAMES: [&str; 6] = ["red", "yellow", "green", "cyan", "blue", "magenta"];
+/// The VS Code theme keys of `COLOR_NAMES`.
+pub const COLOR_KEYS: [&str; 6] = [
+    "terminal.ansiRed",
+    "terminal.ansiYellow",
+    "terminal.ansiGreen",
+    "terminal.ansiCyan",
+    "terminal.ansiBlue",
+    "terminal.ansiMagenta",
+];
+
+impl Palette {
+    /// A color by name (`COLOR_NAMES`, from the theme) or as "#rrggbb".
+    pub fn color(&self, s: &str) -> Option<Hsla> {
+        match COLOR_NAMES.iter().position(|n| n.eq_ignore_ascii_case(s.trim())) {
+            Some(i) => Some(self.named[i]),
+            None => crate::plugins::parse_color(s),
+        }
+    }
+}
+
+/// Whether `s` is a color that `Palette::color` knows.
+pub fn is_color(s: &str) -> bool {
+    palette(true).color(s).is_some()
 }
 
 pub fn palette(dark: bool) -> Palette {
@@ -56,6 +86,8 @@ pub fn palette(dark: bool) -> Palette {
             close_hover: rgb(0xC42B1C).into(),
             find_match: rgba(0xC9A22766).into(),
             find_match_selected: rgba(0xE8892FAA).into(),
+            // VS Code's Dark+ terminal colors
+            named: [0xcd3131, 0xe5e510, 0x0dbc79, 0x11a8cd, 0x2472c8, 0xbc3fbc].map(|c| rgb(c).into()),
         }
     } else {
         Palette {
@@ -75,6 +107,8 @@ pub fn palette(dark: bool) -> Palette {
             close_hover: rgb(0xC42B1C).into(),
             find_match: rgba(0xFFD54F99).into(),
             find_match_selected: rgba(0xFF9E40AA).into(),
+            // VS Code's Light+ terminal colors
+            named: [0xcd3131, 0x949800, 0x00bc00, 0x0598bc, 0x0451a5, 0xbc05bc].map(|c| rgb(c).into()),
         }
     }
 }

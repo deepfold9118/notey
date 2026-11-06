@@ -1,0 +1,10 @@
+{
+  "id": "feature-tab-colors",
+  "kind": "feature",
+  "name": "Tab Colors",
+  "version": "1.0.0",
+  "description": "Gives tabs a color from the tab's right-click menu (Color), drawn as a stripe on the tab, in the theme's colors. A file keeps its color the next time it opens.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "files": ["main.rhai"]
+}

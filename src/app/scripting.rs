@@ -116,7 +116,12 @@ impl NoteyApp {
     }
 
     fn script_snapshot(&self, cx: &App) -> Option<ScriptCtx> {
-        let tab = self.tabs.get(self.active)?;
+        self.script_snapshot_of(self.active, cx)
+    }
+
+    /// A snapshot of the tab at `idx`, as the tab scripts work on.
+    fn script_snapshot_of(&self, idx: usize, cx: &App) -> Option<ScriptCtx> {
+        let tab = self.tabs.get(idx)?;
         let state = tab.state(cx);
         let text = state.doc().to_string();
         let main = state.selection().main();
@@ -135,7 +140,7 @@ impl NoteyApp {
                     title: t.doc.title(),
                     path: t.doc.path.as_ref().map(|p| p.display().to_string()),
                     modified: t.modified,
-                    active: i == self.active,
+                    active: i == idx,
                 })
                 .collect(),
             active_id: tab.doc.id,
@@ -149,6 +154,7 @@ impl NoteyApp {
             script_name: String::new(),
             capabilities: Vec::new(),
             styles: Vec::new(),
+            tab_color: tab.color.clone().unwrap_or_default(),
             ..ScriptCtx::default()
         })
     }
@@ -238,7 +244,10 @@ impl NoteyApp {
             self.flash(msg, cx);
         }
         for action in out.actions {
-            self.host_action(action, window, cx);
+            match action {
+                HostAction::SetTabColor(color) => self.set_tab_color(doc_id, color, cx),
+                action => self.host_action(action, window, cx),
+            }
         }
         cx.notify();
     }
@@ -294,6 +303,7 @@ impl NoteyApp {
             }
             HostAction::ClearStatusItem(key) => self.scripting.status_items.retain(|(k, _, _)| *k != key),
             HostAction::Fetch(url) => self.plugin_fetch(url, window, cx),
+            HostAction::SetTabColor(_) => {}
         }
     }
 
@@ -326,12 +336,27 @@ impl NoteyApp {
         .detach();
     }
 
-    /// Run a plugin command on the active tab.
-    pub(super) fn run_plugin_command(&mut self, script_idx: usize, cmd_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if script_idx >= self.scripting.host.scripts.len() || self.settings_active {
+    /// Run a plugin command on the active tab, or on the tab `target` (a
+    /// command of the tab right-click menu).
+    pub(super) fn run_plugin_command(
+        &mut self,
+        script_idx: usize,
+        cmd_id: &str,
+        target: Option<u64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if script_idx >= self.scripting.host.scripts.len() || (self.settings_active && target.is_none()) {
             return;
         }
-        let Some(snapshot) = self.script_snapshot(cx) else { return };
+        let idx = match target {
+            Some(id) => match self.tab_index(id) {
+                Some(i) => i,
+                None => return,
+            },
+            None => self.active,
+        };
+        let Some(snapshot) = self.script_snapshot_of(idx, cx) else { return };
         let doc_id = snapshot.active_id;
         let out = self.scripting.host.run_command(script_idx, cmd_id, snapshot);
         self.apply_script_result(doc_id, out, window, cx);
@@ -464,7 +489,7 @@ impl NoteyApp {
         });
         if let Some((i, id)) = command {
             cx.stop_propagation();
-            self.run_plugin_command(i, &id, window, cx);
+            self.run_plugin_command(i, &id, None, window, cx);
             return;
         }
         let m = &k.modifiers;

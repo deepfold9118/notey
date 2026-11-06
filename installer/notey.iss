@@ -48,6 +48,7 @@ Source: "{#SourcePath}\..\plugins\index.json"; DestDir: "{app}\plugins"; Flags: 
 Source: "{#SourcePath}\..\plugins\features\feature-spellcheck\*"; DestDir: "{app}\plugins\feature-spellcheck"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\features\feature-markdown-tools\*"; DestDir: "{app}\plugins\feature-markdown-tools"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\features\feature-word-count\*"; DestDir: "{app}\plugins\feature-word-count"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\features\feature-tab-colors\*"; DestDir: "{app}\plugins\feature-tab-colors"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\languages\lang-en-us\*"; DestDir: "{app}\plugins\lang-en-us"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-markdown\*"; DestDir: "{app}\plugins\filetype-markdown"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-json\*"; DestDir: "{app}\plugins\filetype-json"; Flags: ignoreversion

@@ -103,6 +103,23 @@
       "version": "1.0.0"
     },
     {
+      "description": "Gives tabs a color from the tab's right-click menu (Color), drawn as a stripe on the tab, in the theme's colors. A file keeps its color the next time it opens.",
+      "dir": "features/feature-tab-colors",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "62cf4043fe4c132be872aad26e291b8ea43937ff5e078d4c1fcc28c45685710a",
+          "size": 1064
+        }
+      ],
+      "id": "feature-tab-colors",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Tab Colors",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
       "description": "Colors the selected text and its background with the 16 terminal (ANSI) colors, from the right-click menu or Edit menu. The colors stay while the tab is open; they are not saved to the file.",
       "dir": "features/feature-text-color",
       "files": [

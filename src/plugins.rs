@@ -22,7 +22,9 @@ use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope, AST};
 /// (`style_range`, `clear_styles`).
 /// 4: `replace_ranges`, `set_history`, `notey.wasm.run`, `notey.net`
 /// (capability-gated) and the `net` event.
-pub const API_VERSION: i64 = 4;
+/// 5: commands in the tab right-click menu (`menu: "Tab"`), tab colors
+/// (`tab_color`, `set_tab_color`), and color names that follow the theme.
+pub const API_VERSION: i64 = 5;
 
 /// Permissions a script must declare (and, for installed plugins, the
 /// package must grant) before it can use the matching API.
@@ -51,6 +53,8 @@ pub enum HostAction {
     ClearStatusItem(String),
     /// Download a URL into the plugin cache; a `net` event follows.
     Fetch(String),
+    /// The color of the script's tab ("#rrggbb"), or none.
+    SetTabColor(Option<String>),
 }
 
 /// Condition under which a command or key hook is active.
@@ -137,6 +141,8 @@ pub struct ScriptCtx {
     pub history: History,
     /// The selection moved only because of edits: don't scroll to it.
     pub sel_quiet: bool,
+    /// The tab's color ("#rrggbb"), or "".
+    pub tab_color: String,
 }
 
 /// Set or clear the colors of a char range of the script's text.
@@ -170,12 +176,16 @@ pub struct PluginCommand {
     pub group: Option<String>,
     /// Also show the command in the editor's right-click menu.
     pub context: bool,
-    /// A color square shown before the title.
-    pub swatch: Option<Hsla>,
+    /// A color square shown before the title: a color name (see
+    /// `theme::COLOR_NAMES`) or "#rrggbb".
+    pub swatch: Option<String>,
 }
 
 /// Menus that plugin commands can go in.
 pub const MENUS: [&str; 2] = ["Plugins", "Format"];
+/// The tab right-click menu, for commands that act on a tab: they run on
+/// the tab that was right-clicked.
+pub const TAB_MENU: &str = "Tab";
 
 pub struct Script {
     pub name: String,
@@ -284,7 +294,7 @@ impl PluginHost {
                 let shortcut = parse_shortcut(&shortcut_text);
                 let text = |k: &str| m.get(k).and_then(|v| v.clone().into_string().ok());
                 let menu = text("menu")
-                    .and_then(|want| MENUS.iter().find(|n| n.eq_ignore_ascii_case(&want)))
+                    .and_then(|want| MENUS.iter().chain([&TAB_MENU]).find(|n| n.eq_ignore_ascii_case(&want)))
                     .unwrap_or(&MENUS[0])
                     .to_string();
                 commands.push(PluginCommand {
@@ -296,7 +306,7 @@ impl PluginHost {
                     menu,
                     group: text("group").filter(|g| !g.is_empty()),
                     context: m.get("context").and_then(|v| v.as_bool().ok()).unwrap_or(false),
-                    swatch: text("swatch").and_then(|c| parse_color(&c)),
+                    swatch: text("swatch").filter(|c| crate::theme::is_color(c)),
                 });
             }
         }
@@ -504,6 +514,7 @@ fn join(parts, sep) {
                     exact: c.exact.take(),
                     history: c.history,
                     sel_quiet: c.sel_quiet,
+                    tab_color: c.tab_color.clone(),
                 }
             }
         };
@@ -996,6 +1007,23 @@ fn api_engine(ctx: Ctx) -> Engine {
             Some(name.to_string())
         };
         e.ctx.borrow_mut().actions.push(HostAction::SetLanguage(lang));
+    });
+
+    // ---- editor (API 5): the tab's color ----
+    engine.register_fn("tab_color", |e: &mut EditorApi| -> ImmutableString { e.ctx.borrow().tab_color.clone().into() });
+    engine.register_fn("set_tab_color", |e: &mut EditorApi, color: ImmutableString| -> ApiResult<()> {
+        let color = if color.is_empty() {
+            None
+        } else if crate::theme::is_color(&color) {
+            Some(color.trim().to_ascii_lowercase())
+        } else {
+            let names = crate::theme::COLOR_NAMES.join(", ");
+            return Err(format!("'{color}' is not a color: use {names}, or \"#rrggbb\"").into());
+        };
+        let mut c = e.ctx.borrow_mut();
+        c.tab_color = color.clone().unwrap_or_default();
+        c.actions.push(HostAction::SetTabColor(color));
+        Ok(())
     });
 
     // ---- buffers ----

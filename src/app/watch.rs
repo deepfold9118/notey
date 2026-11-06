@@ -37,6 +37,17 @@ impl NoteyApp {
         if self.reload_prompt {
             return;
         }
+        // A missing file that is back (a pinned file on a network share,
+        // say) loads, unless its tab has text of its own.
+        let back: Vec<usize> = (0..self.tabs.len())
+            .filter(|&i| {
+                let t = &self.tabs[i];
+                t.missing() && !t.modified && t.doc.path.as_ref().is_some_and(|p| p.is_file())
+            })
+            .collect();
+        for i in back {
+            self.reload_tab(i, cx);
+        }
         let mut deleted = None;
         let mut changed = None;
         for tab in &mut self.tabs {

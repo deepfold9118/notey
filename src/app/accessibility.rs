@@ -30,6 +30,7 @@ const MENU_FILE: NodeId = NodeId(9);
 const MENU_EDIT: NodeId = NodeId(10);
 const MENU_HELP: NodeId = NodeId(11);
 const OPEN_MENU: NodeId = NodeId(12);
+const MENU_VIEW: NodeId = NodeId(13);
 const EDITOR: NodeId = NodeId(20);
 const FIND_BAR: NodeId = NodeId(21);
 const FIND_FIELD: NodeId = NodeId(22);
@@ -53,6 +54,14 @@ const SUBMENU_LEVEL: u64 = 1_000;
 const SUBMENU_LEVELS: usize = 1 + ((TAB - SUBMENU_ITEM) / SUBMENU_LEVEL) as usize;
 const TAB: u64 = 10_000;
 const TEXT_RUN: u64 = 1_000_000;
+
+/// The menus of the menu bar, in order.
+const MENU_BAR_MENUS: [(NodeId, &str, Menu); 4] = [
+    (MENU_FILE, "File", Menu::File),
+    (MENU_EDIT, "Edit", Menu::Edit),
+    (MENU_VIEW, "View", Menu::View),
+    (MENU_HELP, "Help", Menu::Help),
+];
 
 /// Documents longer than this get their text, but no per-line runs.
 const MAX_RUN_CHARS: usize = 200_000;
@@ -114,7 +123,17 @@ impl NoteyApp {
         }
         for (i, tab) in self.tabs.iter().enumerate() {
             let id = NodeId(TAB + tab.doc.id);
-            let title = if tab.modified { format!("{} (modified)", tab.doc.title()) } else { tab.doc.title() };
+            let notes: Vec<&str> = [
+                (tab.pinned, "pinned"),
+                (tab.modified, "modified"),
+                (tab.missing(), "file not found"),
+                (tab.color.is_some(), "colored"),
+            ]
+            .into_iter()
+            .filter_map(|(on, note)| on.then_some(note))
+            .collect();
+            let title =
+                if notes.is_empty() { tab.doc.title() } else { format!("{} ({})", tab.doc.title(), notes.join(", ")) };
             let mut n = node(Role::Tab, title);
             n.set_selected(!self.settings_active && i == self.active);
             n.add_action(Action::Click);
@@ -141,7 +160,7 @@ impl NoteyApp {
 
         // Menu bar and the open menu.
         let mut menu_bar = node(Role::MenuBar, "");
-        for (id, label, menu) in [(MENU_FILE, "File", Menu::File), (MENU_EDIT, "Edit", Menu::Edit), (MENU_HELP, "Help", Menu::Help)] {
+        for (id, label, menu) in MENU_BAR_MENUS {
             let mut n = node(Role::MenuItem, label);
             n.add_action(Action::Click);
             n.set_expanded(self.open_menu == Some(menu));
@@ -431,9 +450,10 @@ impl NoteyApp {
             (MINIMIZE, Action::Click) => window.minimize_window(),
             (MAXIMIZE, Action::Click) => window.zoom_window(),
             (CLOSE, Action::Click) => window.remove_window(),
-            (MENU_FILE | MENU_EDIT | MENU_HELP, Action::Click) => {
-                let menu = [Menu::File, Menu::Edit, Menu::Help][(id - MENU_FILE.0) as usize];
-                self.open_menu = if self.open_menu == Some(menu) { None } else { Some(menu) };
+            (MENU_FILE | MENU_EDIT | MENU_VIEW | MENU_HELP, Action::Click) => {
+                if let Some(&(_, _, menu)) = MENU_BAR_MENUS.iter().find(|(n, _, _)| *n == target_node) {
+                    self.open_menu = if self.open_menu == Some(menu) { None } else { Some(menu) };
+                }
             }
             (_, Action::Click) if menu_item_at(id).is_some() => {
                 let (level, i) = menu_item_at(id).unwrap_or_default();

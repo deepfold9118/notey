@@ -11,6 +11,7 @@ mod languages;
 mod updates;
 mod settings_tab;
 mod spelling;
+mod tabs;
 mod themes;
 mod plugins_ui;
 mod preview;
@@ -106,6 +107,7 @@ pub fn init(cx: &mut App) {
         GpuiKeyBinding::new("ctrl-0", ZoomReset, None),
         GpuiKeyBinding::new("f5", InsertTimeDate, None),
         GpuiKeyBinding::new("ctrl-,", OpenSettings, None),
+        GpuiKeyBinding::new("ctrl-\\", tabs::ToggleSplit, None),
     ]);
     cx.bind_keys(find::bindings());
 }
@@ -129,6 +131,11 @@ struct Tab {
     suggestion: Option<String>,
     /// The pending file type detection after an edit.
     detecting: Option<Task<()>>,
+    /// Pinned tabs come first and can't be closed (main window only).
+    pinned: bool,
+    /// The tab's color, set by a plugin: a name from `theme::COLOR_NAMES`
+    /// (the theme decides the color) or "#rrggbb".
+    color: Option<String>,
     _observe: Subscription,
 }
 
@@ -148,6 +155,11 @@ impl Tab {
         self.line = line.number;
         self.col = line.text[..head - line.from].chars().count() + 1;
         self.seen = state;
+    }
+
+    /// The tab's file is not on disk (a pinned file that is gone).
+    fn missing(&self) -> bool {
+        self.doc.path.is_some() && self.doc.disk_mtime.is_none()
     }
 }
 
@@ -183,6 +195,13 @@ pub struct NoteyApp {
     submenu_hovered: u32,
     /// The tab list on the left is being resized.
     resizing_tab_list: bool,
+    /// The tab right-click menu, when open.
+    tab_menu: Option<tabs::TabMenu>,
+    /// Split view: a second tab beside the active one.
+    split: Option<tabs::Split>,
+    /// The split view's divider is being dragged.
+    resizing_split: bool,
+    split_area: tabs::SplitArea,
     submenu_rows: chrome::SubmenuRows,
     /// The window height, for the height of menus.
     viewport_h: f32,
@@ -261,6 +280,10 @@ impl NoteyApp {
             open_submenus: Vec::new(),
             submenu_hovered: 0,
             resizing_tab_list: false,
+            tab_menu: None,
+            split: None,
+            resizing_split: false,
+            split_area: Default::default(),
             submenu_rows: Default::default(),
             viewport_h: 720.0,
             a11y,
@@ -415,6 +438,8 @@ impl NoteyApp {
             col: 1,
             suggestion: None,
             detecting: None,
+            pinned: false,
+            color: None,
             _observe: observe,
         };
         tab.refresh(state, true);
@@ -475,7 +500,9 @@ impl NoteyApp {
         let query = self
             .find_open(cx)
             .then(|| codemirror_search::get_search_query(self.tabs[self.active].state(cx)));
-        self.active = idx.min(self.tabs.len() - 1);
+        let idx = idx.min(self.tabs.len() - 1);
+        self.swap_if_other(idx);
+        self.active = idx;
         self.settings_active = false;
         self.carry_find(query, cx);
         self.focus_active(window, cx);
@@ -499,12 +526,24 @@ impl NoteyApp {
     }
 
     fn request_close_tab(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(tab) = self.tabs.get(idx) else { return };
+        if let Some(id) = self.tabs.get(idx).map(|t| t.doc.id) {
+            self.ask_close(id, window, cx).detach();
+        }
+    }
+
+    /// Close the tab `id`, asking first when it has unsaved changes. The
+    /// task resolves to whether it closed. Pinned tabs stay.
+    fn ask_close(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) -> Task<bool> {
+        let Some(idx) = self.tab_index(id) else { return Task::ready(true) };
+        let tab = &self.tabs[idx];
+        if tab.pinned {
+            self.flash("Unpin the tab to close it".into(), cx);
+            return Task::ready(false);
+        }
         if !tab.modified {
             self.close_tab(idx, window, cx);
-            return;
+            return Task::ready(true);
         }
-        let id = tab.doc.id;
         let message = format!("Do you want to save changes to {}?", tab.doc.title());
         let answer = window.prompt(PromptLevel::Warning, &message, None, &["Save", "Don't Save", "Cancel"], cx);
         cx.spawn_in(window, async move |this, cx| {
@@ -523,8 +562,8 @@ impl NoteyApp {
                     }
                 });
             }
+            close
         })
-        .detach();
     }
 
     fn close_tab(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -535,6 +574,7 @@ impl NoteyApp {
         if self.active > idx || self.active >= self.tabs.len() {
             self.active = self.active.saturating_sub(1).min(self.tabs.len() - 1);
         }
+        self.check_split();
         self.session_dirty = true;
         self.focus_active(window, cx);
         cx.notify();
@@ -577,11 +617,16 @@ impl NoteyApp {
             Ok((mut doc, text)) => {
                 doc.language = crate::syntax::detect(&path);
                 // Replace a pristine untitled tab.
-                if self.tabs.len() == 1 && self.tabs[0].doc.path.is_none() && self.tabs[0].state(cx).doc().is_empty()
+                if self.tabs.len() == 1
+                    && !self.tabs[0].pinned
+                    && self.tabs[0].doc.path.is_none()
+                    && self.tabs[0].state(cx).doc().is_empty()
                 {
                     self.tabs.clear();
+                    self.split = None;
                 }
                 let idx = self.add_tab(doc, text, cx);
+                self.tabs[idx].color = self.file_color(&path);
                 // A file without an extension: the text decides.
                 if self.tabs[idx].doc.auto_language {
                     let id = self.tabs[idx].doc.id;
@@ -695,42 +740,66 @@ impl NoteyApp {
 
     fn restore_session(&mut self, cx: &mut Context<Self>) {
         let Some(session) = session::load() else { return };
+        // The document each saved tab became, if it could be restored.
+        let mut restored: Vec<Option<u64>> = Vec::new();
         for tab in session.tabs {
             let id = self.new_doc_id();
             let (mut doc, text) = match (&tab.path, tab.dirty_text) {
                 (Some(path), Some(text)) => (Document::restore_file(id, path), text),
                 (Some(path), None) => match Document::open(id, path) {
                     Ok(opened) => opened,
-                    Err(_) => continue, // the file is gone
+                    // A pinned file that is gone keeps its tab.
+                    Err(_) if tab.pinned => (Document::restore_file(id, path), String::new()),
+                    Err(_) => {
+                        restored.push(None);
+                        continue; // the file is gone
+                    }
                 },
-                (None, Some(text)) => {
+                (None, text) => {
+                    if text.is_none() && !tab.pinned {
+                        restored.push(None);
+                        continue;
+                    }
                     self.next_untitled = self.next_untitled.max(tab.untitled_n + 1);
-                    (Document::new(id, tab.untitled_n), text)
+                    (Document::new(id, tab.untitled_n), text.unwrap_or_default())
                 }
-                (None, None) => continue,
             };
             doc.language = tab.language;
             if let Some(auto) = tab.auto_language {
                 doc.auto_language = auto;
             }
-            self.add_tab(doc, text, cx);
+            let idx = self.add_tab(doc, text, cx);
+            self.tabs[idx].pinned = tab.pinned && self.is_primary;
+            self.tabs[idx].color = tab.color;
+            restored.push(Some(id));
         }
-        if !self.tabs.is_empty() {
-            self.active = session.active.min(self.tabs.len() - 1);
+        // Pinned tabs first, in case the session was edited.
+        self.tabs.sort_by_key(|t| !t.pinned);
+        let active = restored.get(session.active).copied().flatten();
+        self.active = active.and_then(|id| self.tab_index(id)).unwrap_or(0);
+        if let Some(saved) = session.split {
+            if let Some(other) = restored.get(saved.other).copied().flatten() {
+                self.split = Some(tabs::Split { other, other_left: saved.other_left, ratio: saved.ratio.clamp(0.15, 0.85) });
+                self.check_split();
+            }
         }
     }
 
     fn session_snapshot(&self, cx: &App) -> Session {
         let mut tabs = Vec::new();
         let mut active = 0;
+        let mut split_at = None;
         for (i, t) in self.tabs.iter().enumerate() {
             let text = t.state(cx).doc();
-            // Skip pristine empty untitled tabs.
-            if t.doc.path.is_none() && text.is_empty() {
+            // Skip pristine empty untitled tabs, unless pinned.
+            if t.doc.path.is_none() && text.is_empty() && !t.pinned {
                 continue;
             }
             if i == self.active {
                 active = tabs.len();
+            }
+            if self.split.as_ref().is_some_and(|s| s.other == t.doc.id) {
+                split_at = Some(tabs.len());
             }
             tabs.push(SessionTab {
                 path: t.doc.path.clone(),
@@ -738,9 +807,14 @@ impl NoteyApp {
                 dirty_text: t.modified.then(|| text.to_string()),
                 language: t.doc.language.clone(),
                 auto_language: Some(t.doc.auto_language),
+                pinned: t.pinned,
+                color: t.color.clone(),
             });
         }
-        Session { active, tabs }
+        let split = self.split.as_ref().and_then(|s| {
+            Some(session::SessionSplit { other: split_at?, other_left: s.other_left, ratio: s.ratio })
+        });
+        Session { active, tabs, split }
     }
 
     fn save_session(&mut self, cx: &App) {
@@ -905,6 +979,7 @@ impl NoteyApp {
                 this.with_editor(cx, |view, cx| view.insert_text(&stamp, "input", cx));
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(window, cx)))
+            .on_action(cx.listener(|this, _: &tabs::ToggleSplit, window, cx| this.toggle_split(window, cx)))
             .on_action(cx.listener(|this, _: &Print, _, cx| this.print(cx)))
             .on_action(cx.listener(|_, _: &Exit, window, _| window.remove_window()))
             .on_action(cx.listener(|this, _: &Undo, _, cx| this.with_editor(cx, |v, cx| _ = v.run_state_command(undo, cx))))
@@ -963,12 +1038,13 @@ impl Render for NoteyApp {
                 .children(self.find_bar(window, cx))
                 .children(self.context_popup(cx))
                 .into_any_element();
-            match self.markdown_view(cx) {
+            let focused = match self.markdown_view(cx) {
                 // The rendered Markdown in place of the editor.
                 Some((view, true)) => div().flex_1().min_h_0().flex().child(view).into_any_element(),
                 Some((view, false)) => div().flex_1().min_h_0().flex().child(editor).child(view).into_any_element(),
                 None => editor,
-            }
+            };
+            self.split_body(focused, cx)
         };
         if self.script_events_due() {
             cx.defer_in(window, |this, window, cx| this.flush_script_events(window, cx));
@@ -1000,8 +1076,14 @@ impl Render for NoteyApp {
         let root = div()
             .id("notey")
             .key_context("Notey")
-            .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| this.resize_tab_list(e.position.x, cx)))
-            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _, _, _| this.end_tab_list_resize()))
+            .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
+                this.resize_tab_list(e.position.x, cx);
+                this.resize_split(e.position.x, cx);
+            }))
+            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _, _, _| {
+                this.end_tab_list_resize();
+                this.end_split_resize();
+            }))
             .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| this.plugin_key(event, window, cx)))
             .size_full()
             .flex()
@@ -1012,6 +1094,7 @@ impl Render for NoteyApp {
             .text_size(px(13.))
             .child(self.title_bar(window, cx))
             .child(content)
+            .children(self.tab_menu_popup(cx))
             .children(submenus);
         let root = self.register_actions(root, cx);
         self.register_find_actions(root, cx)

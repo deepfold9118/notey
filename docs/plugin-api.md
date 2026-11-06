@@ -1,12 +1,12 @@
 # Notey Plugin API
 
-> **Implementation status (November 2026, API 4):** Rhai scripts are live
+> **Implementation status (November 2026, API 5):** Rhai scripts are live
 > in `src/plugins.rs`. They come from two places: your own scripts in
 > `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
 > Plugins window (see [`plugins/README.md`](https://github.com/deepfold9118/notey/blob/main/plugins/README.md)). The
-> official Markdown Tools, Word Count, Autocorrect, Export & Print and
-> Math plugins in `plugins/features/` are working examples of everything
-> below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
+> official Markdown Tools, Word Count, Autocorrect, Export & Print, Math
+> and Tab Colors plugins in `plugins/features/` are working examples of
+> everything below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
 > not as plugins of their own. Not yet implemented: pos/line conversions,
 > `begin_undo_group`/`end_undo_group` (`set_history` covers plugin
 > edits), encoding/line-ending setters, `confirm`/`prompt`/`form`/panels,
@@ -14,6 +14,21 @@
 >
 > **Scope note:** `notey` is available in every function of a script,
 > including your own helper functions.
+
+## API 5 additions (quick reference)
+
+| Call or field | Notes |
+|---|---|
+| command `menu: "Tab"` | put the command in the tab right-click menu (its `group` makes a submenu there). It runs on the tab that was right-clicked, which need not be the active tab: `notey.editor` reads and edits that tab |
+| `notey.editor.tab_color() -> String` | the tab's color, or `""` |
+| `notey.editor.set_tab_color(color)` | give the tab a color, drawn as a stripe on the tab; `""` removes it. Notey remembers a file's color, so the tab has it again the next time the file opens |
+
+**Color names.** `set_tab_color` and the `swatch` field take a color name
+as well as `"#rrggbb"`: `red`, `yellow`, `green`, `cyan`, `blue` or
+`magenta`. A name follows the theme: it is the theme's terminal color
+(`terminal.ansiRed` and so on in a VS Code theme), and with Notey's own
+themes, VS Code's Dark+ and Light+ terminal colors. So a tab that is
+`blue` matches every theme, and changes when the theme does.
 
 ## API 4 additions (quick reference)
 
@@ -47,7 +62,7 @@ engine in `crates/notey-math`) is an example.
 | `menu` | `"Plugins"` (the default) or `"Format"`. Since Notey 0.7.0, the commands of both values go in the Edit menu of the menu bar. Since 0.8.2, the compact menu (the Notey icon, when the menu bar is hidden) has a Plugins and a Format submenu for them. |
 | `group` | name of a submenu for the command, inside the Edit menu (or the Plugins or Format submenu) |
 | `context: true` | also show the command in the editor's right-click menu |
-| `swatch: "#rrggbb"` | show a color square before the title |
+| `swatch: "#rrggbb"` | show a color square before the title (since API 5, also a color name that follows the theme) |
 
 **Text styles** (kept in memory while the tab is open, never written to
 the file; the host moves them when the text changes):
