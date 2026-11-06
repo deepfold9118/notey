@@ -214,17 +214,49 @@ fn markdown(lines: &[&str]) -> u32 {
     }
 }
 
+/// Type names that Python type hints use.
+const PY_TYPES: &[&str] = &[
+    "int", "float", "str", "bool", "bytes", "complex", "list", "dict", "tuple", "set", "frozenset", "object", "None",
+    "Any", "Optional", "Union", "List", "Dict", "Tuple", "Set", "Callable", "Iterable", "Iterator", "Sequence",
+];
+
+/// A Python type hint: `int`, `list[str]`, `Optional[int]`, `int | None`.
+fn python_type(s: &str) -> bool {
+    let base = s.trim().split(['[', ' ', '|']).next().unwrap_or("");
+    PY_TYPES.contains(&base)
+}
+
+/// A variable with a type hint: `count: int = 10` or `name: str`.
+fn python_annotation(t: &str) -> bool {
+    let Some((name, rest)) = t.split_once(':') else { return false };
+    let ident = name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    let ty = rest.split_once(" = ").map_or(rest, |(ty, _)| ty);
+    ident && rest.starts_with(' ') && python_type(ty)
+}
+
+/// A `def` whose parameters have type hints: `def f(a: int, b: str = "")`.
+fn python_typed_def(t: &str) -> bool {
+    let Some(params) = t.strip_prefix("def ").and_then(|r| r.split_once('(')).map(|(_, p)| p) else { return false };
+    let params = params.rsplit_once(')').map_or(params, |(p, _)| p);
+    params.split(',').any(|p| p.split_once(':').is_some_and(|(_, ty)| python_type(ty.split('=').next().unwrap_or(""))))
+}
+
 fn python(lines: &[&str]) -> u32 {
     score(lines, |l| {
         let t = l.trim();
         if t.starts_with("if __name__") {
             return 6;
         }
+        if python_annotation(t) {
+            return 2;
+        }
         let block = ["def ", "class ", "if ", "elif ", "else", "for ", "while ", "with ", "try", "except", "finally"]
             .iter()
             .any(|k| t.starts_with(k));
         let import = (t.starts_with("import ") || t.starts_with("from ") && t.contains(" import ")) && !t.ends_with(';');
         u32::from(t.starts_with("def ") && t.ends_with(':')) * 3
+            + u32::from(python_typed_def(t) || t.starts_with("def ") && t.contains(") -> ")) * 3
             + u32::from(t.starts_with("elif ")) * 3
             + u32::from(block && t.ends_with(':')) * 2
             + u32::from(import) * 3
@@ -330,6 +362,10 @@ fn yaml(lines: &[&str]) -> u32 {
     let content: Vec<&str> = lines.iter().copied().filter(|l| !l.trim().is_empty()).collect();
     let key = |l: &str| {
         let t = l.trim_start().trim_start_matches("- ");
+        // "count: int = 10" is a Python variable, not a YAML key.
+        if python_annotation(t.trim_end()) {
+            return false;
+        }
         match t.split_once(':') {
             Some((k, rest)) => {
                 !k.is_empty()
@@ -399,7 +435,9 @@ fn php(lines: &[&str]) -> u32 {
 fn ruby(lines: &[&str]) -> u32 {
     score(lines, |l| {
         let t = l.trim();
-        u32::from(t.starts_with("def ") && !t.ends_with(':') && !t.ends_with('{')) * 2
+        // Python's `def` ends in ":" or has type hints.
+        let python_def = t.ends_with(':') || python_typed_def(t) || t.contains(") -> ");
+        u32::from(t.starts_with("def ") && !python_def && !t.ends_with('{')) * 2
             + u32::from(t.starts_with("require '") || t.starts_with("require \"") || t.starts_with("require_relative ")) * 3
             + u32::from(t.contains(" do |") || t.starts_with("attr_accessor ") || t.starts_with("module ")) * 3
             + u32::from(starts_word(t, "puts") || t.ends_with(".each do")) * 2
@@ -471,6 +509,13 @@ mod tests {
         assert_eq!(detect(md), Some("filetype-markdown"));
         let py = "import os\nfrom pathlib import Path\n\ndef main():\n    for p in Path('.').iterdir():\n        print(p)\n";
         assert_eq!(detect(py), Some("filetype-python"));
+        // Type hints, with no imports or colon-ended blocks to go on.
+        let typed = "measure: int = 10\nmultiplier: float = 1.5\n\ndef test_script(start: int, multiplier: int): float >\n\treturn start * multiplier\n\ntest_script(measure, multiplier)\n";
+        assert_eq!(detect(typed), Some("filetype-python"));
+        let typed = "measure: int = 10\nmultiplier: float = 1.5\n\ndef test_script(start: int, multiplier: int) -> float:\n\treturn start * multiplier\n";
+        assert_eq!(detect(typed), Some("filetype-python"));
+        let rb = "require 'json'\n\ndef greet(name)\n  puts \"hi #{name}\"\nend\n";
+        assert_eq!(detect(rb), Some("filetype-ruby"));
         let rs = "use std::fs;\n\nfn main() {\n    let mut x = Vec::new();\n    println!(\"{x:?}\");\n}\n";
         assert_eq!(detect(rs), Some("filetype-rust"));
         let js = "const fs = require('fs');\nfunction go(a) {\n  console.log(a);\n}\n";
