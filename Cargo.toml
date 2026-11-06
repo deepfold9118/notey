@@ -3,7 +3,7 @@ members = [".", "xtask", "crates/notey-math"]
 
 [package]
 name = "notey"
-version = "0.10.1"
+version = "0.11.0"
 edition = "2021"
 description = "A native notepad with dark mode, tabs, and spellcheck"
 license = "Apache-2.0"

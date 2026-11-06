@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-05
+
 ### Added
 - Terminal, a new Feature plugin: Open in Terminal and Run in Terminal in
   the tab menu, and Ctrl+F5 to run the active tab. Choose the terminal
@@ -422,7 +424,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/deepfold9118/notey/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/deepfold9118/notey/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/deepfold9118/notey/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/deepfold9118/notey/compare/v0.8.8...v0.9.0
