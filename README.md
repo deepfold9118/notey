@@ -6,6 +6,8 @@ Zed editor), a Rust port of [CodeMirror 6](https://codemirror.net/) for the
 editor, and [spellbook](https://github.com/helix-editor/spellbook)
 (Hunspell-compatible) for spellcheck.
 
+**Documentation:** [deepfold9118.github.io/notey](https://deepfold9118.github.io/notey/)
+
 ![Notey with three tabs open, showing syntax-highlighted Rust code in the dark Fluent theme](docs/screenshot.png)
 
 The UI is styled after Fluent / WinUI (Windows 11 Notepad): a frameless
