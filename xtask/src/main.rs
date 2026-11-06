@@ -27,6 +27,15 @@ const SUBLIME_COMMIT: &str = "759d6eed9b4beed87e602a23303a121c3a6c2fb3";
 /// bat, whose patches make Sublime's grammars parse correctly in syntect.
 const BAT_REPO: &str = "sharkdp/bat";
 const BAT_COMMIT: &str = "4987f76709aae3a1c4db723c53874c9ddcb0c4fd";
+/// File types Sublime's packages lack, from the grammars bat bundles (at
+/// the submodule commits bat pins): (name, repo, commit, grammar, license).
+const EXTRA_FILETYPES: &[(&str, &str, &str, &str, &str)] = &[(
+    "TOML",
+    "jasonwilliams/sublime_toml_highlighting",
+    "f5a57e8bff694a4e6c52a491dae579aabc7427cf",
+    "TOML.sublime-syntax",
+    "LICENSE",
+)];
 const DICT_REPO: &str = "LibreOffice/dictionaries";
 const DICT_COMMIT: &str = "32b006a2c22a4ac7e8ed3f03346f7b3d85a970a4";
 
@@ -405,6 +414,8 @@ struct FileTypeInfo {
     extensions: BTreeSet<String>,
     provides: BTreeSet<String>,
     references: BTreeSet<String>,
+    source: String,
+    license: String,
 }
 
 fn build_filetypes(root: &Path) -> Res<()> {
@@ -432,6 +443,8 @@ fn build_filetypes(root: &Path) -> Res<()> {
         let mut info = FileTypeInfo {
             id: id.clone(),
             name: pkg.clone(),
+            source: format!("https://github.com/{SUBLIME_REPO}/tree/{SUBLIME_COMMIT}/{pkg}"),
+            license: "Sublime Text Packages license (see bundled license files)".into(),
             ..Default::default()
         };
         for g in grammars {
@@ -469,6 +482,32 @@ fn build_filetypes(root: &Path) -> Res<()> {
         }
         infos.push(info);
     }
+    for (name, repo, commit, grammar, license) in EXTRA_FILETYPES {
+        let id = format!("filetype-{}", slug(name));
+        let dir = out_root.join(&id);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let text = String::from_utf8(get_bytes(&raw_url(repo, commit, grammar))?)
+            .map_err(|e| format!("{grammar}: {e}"))?;
+        let def = syntect::parsing::SyntaxDefinition::load_from_str(&text, true, None)
+            .map_err(|e| format!("{grammar}: grammar does not parse: {e}"))?;
+        let mut info = FileTypeInfo {
+            id,
+            name: name.to_string(),
+            source: format!("https://github.com/{repo}/tree/{commit}"),
+            license: format!("MIT (see bundled {license})"),
+            ..Default::default()
+        };
+        info.extensions.extend(def.file_extensions.iter().cloned());
+        info.provides.insert(def.scope.build_string());
+        info.references.extend(scope_re(&text));
+        all_defs.push(def);
+        fs::write(dir.join(grammar), &text).map_err(|e| e.to_string())?;
+        info.files.push(grammar.to_string());
+        let license_text = get_bytes(&raw_url(repo, commit, license))?;
+        fs::write(dir.join(license), license_text).map_err(|e| e.to_string())?;
+        info.files.push(license.to_string());
+        infos.push(info);
+    }
 
     // the whole family must also build together
     let mut builder = syntect::parsing::SyntaxSetBuilder::new();
@@ -500,11 +539,11 @@ fn build_filetypes(root: &Path) -> Res<()> {
                 "name": info.name,
                 "version": "1.0.0",
                 "description": format!("Syntax highlighting for {}.", info.name),
-                "license": "Sublime Text Packages license (see bundled license files)",
+                "license": info.license,
                 "extensions": info.extensions,
                 "recommends": recommends,
                 "files": info.files,
-                "source": format!("https://github.com/{SUBLIME_REPO}/tree/{SUBLIME_COMMIT}/{}", info.name),
+                "source": info.source,
             }),
         )?;
         println!("  filetype {:<22} {} ext, {} recommended", info.name, info.extensions.len(), recommends.len());

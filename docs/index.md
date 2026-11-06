@@ -1,5 +1,5 @@
 A native Rust notepad for Windows, styled after Windows 11 Notepad: dark
-mode, tabs, spellcheck, syntax highlighting for 45 file types, and plugins,
+mode, tabs, spellcheck, syntax highlighting for 46 file types, and plugins,
 including live math in any tab.
 
 ![Notey with three tabs open, showing syntax-highlighted Rust code in the dark Fluent theme](screenshot.png)

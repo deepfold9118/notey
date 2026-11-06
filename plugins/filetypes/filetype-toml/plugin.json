@@ -1,0 +1,24 @@
+{
+  "description": "Syntax highlighting for TOML.",
+  "extensions": [
+    "Cargo.lock",
+    "Gopkg.lock",
+    "Pipfile",
+    "pdm.lock",
+    "poetry.lock",
+    "tml",
+    "toml",
+    "uv.lock"
+  ],
+  "files": [
+    "TOML.sublime-syntax",
+    "LICENSE"
+  ],
+  "id": "filetype-toml",
+  "kind": "filetype",
+  "license": "MIT (see bundled LICENSE)",
+  "name": "TOML",
+  "recommends": [],
+  "source": "https://github.com/jasonwilliams/sublime_toml_highlighting/tree/f5a57e8bff694a4e6c52a491dae579aabc7427cf",
+  "version": "1.0.0"
+}

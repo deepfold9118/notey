@@ -6,6 +6,11 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- TOML, a new File Type plugin (.toml, Cargo.lock, Pipfile, poetry.lock
+  and other TOML files), installed by default. An untitled tab with TOML
+  text is recognized too, while INI files still stay plain text.
+
 ## [0.11.0] - 2026-11-05
 
 ### Added

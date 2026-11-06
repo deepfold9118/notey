@@ -61,7 +61,7 @@ no session, so they prompt on close instead.
 - **Spellchecker** (plugin) — red underline on misspelled words; right-click
   a word for suggestions or "Add to dictionary"; dictionaries come from
   Language plugins
-- **Syntax highlighting** (plugins) — one File Type plugin per language (45
+- **Syntax highlighting** (plugins) — one File Type plugin per language (46
   available), auto-detected by file extension with a filterable language
   picker in the status bar. Untitled tabs and files without an extension
   get their file type from their text, and the status bar offers the
@@ -141,7 +141,7 @@ Notey keeps its core minimal; everything else is a plugin, managed from
   variants, Spanish, French, German, Italian, Portuguese, Dutch, Polish,
   Swedish, Danish, Russian, Ukrainian). A word is accepted if any enabled
   language knows it; "Add to dictionary" words are saved permanently.
-- **File Types** — syntax highlighting, one plugin per file type (45
+- **File Types** — syntax highlighting, one plugin per file type (46
   available). Open a file Notey doesn't recognize and the status bar offers
   the matching plugin.
 
@@ -206,4 +206,7 @@ which ship inside each plugin: spellcheck dictionaries come from the
 [LibreOffice dictionaries](https://github.com/LibreOffice/dictionaries)
 project, and file type grammars from
 [Sublime Text's Packages](https://github.com/sublimehq/Packages) with
-[bat](https://github.com/sharkdp/bat)'s syntect compatibility patches.
+[bat](https://github.com/sharkdp/bat)'s syntect compatibility patches. The
+TOML grammar comes from
+[sublime_toml_highlighting](https://github.com/jasonwilliams/sublime_toml_highlighting)
+(MIT), at the version bat bundles.

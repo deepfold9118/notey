@@ -115,7 +115,7 @@ Settings > Plugins:
 - **Languages**: spellcheck dictionaries for 16 languages. A word is
   accepted if any enabled language knows it. Right-click a misspelled word
   for suggestions or "Add to dictionary".
-- **File Types**: syntax highlighting for 45 file types. Notey picks the
+- **File Types**: syntax highlighting for 46 file types. Notey picks the
   type from the file extension or, for new tabs, from the text. When a file
   needs a plugin you don't have, the status bar offers it.
 

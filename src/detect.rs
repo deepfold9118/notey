@@ -33,8 +33,9 @@ pub fn detect(text: &str) -> Option<&'static str> {
     let lines: Vec<&str> = trimmed.lines().take(MAX_LINES).collect();
     // Section headers ("[package]", "[Setup]") mark INI and TOML files,
     // whose keys and comments would otherwise pass for other languages.
+    // TOML's values are typed ("1", "true", "[...]"); INI's are bare text.
     if lines.iter().filter(|l| is_section(l)).count() >= 2 {
-        return None;
+        return is_toml(&lines).then_some("filetype-toml");
     }
     let mut scores: Vec<(&'static str, u32)> = RULES.iter().map(|(id, rule)| (*id, rule(&lines))).collect();
     scores.sort_by_key(|s| std::cmp::Reverse(s.1));
@@ -130,10 +131,37 @@ fn signature(text: &str, whole: bool) -> Option<&'static str> {
 
 fn is_section(line: &str) -> bool {
     let t = line.trim_end();
+    // "[[bin]]" is a TOML array of tables.
+    let t = t.strip_prefix('[').and_then(|t| t.strip_suffix(']')).filter(|t| t.starts_with('[')).unwrap_or(t);
     t.len() > 2
         && t.starts_with('[')
         && t.ends_with(']')
         && t[1..t.len() - 1].chars().all(|c| c.is_alphanumeric() || " ._-\"".contains(c))
+}
+
+/// Whether the "key = value" lines of a sectioned file are TOML: most
+/// values are strings, numbers, booleans, arrays or inline tables.
+fn is_toml(lines: &[&str]) -> bool {
+    let (mut keys, mut typed) = (0, 0);
+    for line in lines {
+        let t = line.trim();
+        if t.starts_with(['#', ';', '[']) {
+            continue;
+        }
+        let Some((key, value)) = t.split_once('=') else { continue };
+        let key = key.trim();
+        let bare = |c: char| c.is_alphanumeric() || "_-.\"' ".contains(c);
+        if key.is_empty() || !key.chars().all(bare) {
+            continue;
+        }
+        keys += 1;
+        let v = value.trim();
+        let number = v.split(['#', ' ']).next().is_some_and(|n| !n.is_empty() && n.parse::<f64>().is_ok());
+        if v.starts_with(['"', '\'', '[', '{']) || number || v.starts_with("true") || v.starts_with("false") {
+            typed += 1;
+        }
+    }
+    keys >= 2 && typed * 4 >= keys * 3
 }
 
 type Rule = fn(&[&str]) -> u32;
@@ -537,7 +565,7 @@ mod tests {
         assert_eq!(detect("Shopping list\nNote: buy milk\nCall Sam at 5.\n"), None);
         assert_eq!(detect("Dear team,\n\nThe build is green again. Thanks for the quick fixes.\n"), None);
         assert_eq!(detect("[1, 2, 3]"), None);
-        // Comments are not headings; INI and TOML files have no plugin.
+        // Comments are not headings; INI files have no plugin.
         assert_eq!(detect("# build output
 /target
 *.pdb
@@ -551,7 +579,18 @@ name = \"notey\"
 [dependencies]
 serde = \"1\"
 ";
-        assert_eq!(detect(toml), None);
+        assert_eq!(detect(toml), Some("filetype-toml"));
+        let pyproject = "[project]
+name = \"tool\"
+version = \"0.1.0\"
+dependencies = [
+  \"requests>=2\",
+]
+
+[[tool.mypy.overrides]]
+strict = true
+";
+        assert_eq!(detect(pyproject), Some("filetype-toml"));
         assert_eq!(detect("<#
 .Synopsis
 Do things.

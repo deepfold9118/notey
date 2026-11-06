@@ -54,6 +54,7 @@ Source: "{#SourcePath}\..\plugins\filetypes\filetype-markdown\*"; DestDir: "{app
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-json\*"; DestDir: "{app}\plugins\filetype-json"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-xml\*"; DestDir: "{app}\plugins\filetype-xml"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-yaml\*"; DestDir: "{app}\plugins\filetype-yaml"; Flags: ignoreversion
+Source: "{#SourcePath}\..\plugins\filetypes\filetype-toml\*"; DestDir: "{app}\plugins\filetype-toml"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-html\*"; DestDir: "{app}\plugins\filetype-html"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-css\*"; DestDir: "{app}\plugins\filetype-css"; Flags: ignoreversion
 Source: "{#SourcePath}\..\plugins\filetypes\filetype-javascript\*"; DestDir: "{app}\plugins\filetype-javascript"; Flags: ignoreversion

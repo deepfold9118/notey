@@ -2358,6 +2358,39 @@
       "version": "1.0.0"
     },
     {
+      "description": "Syntax highlighting for TOML.",
+      "dir": "filetypes/filetype-toml",
+      "extensions": [
+        "Cargo.lock",
+        "Gopkg.lock",
+        "Pipfile",
+        "pdm.lock",
+        "poetry.lock",
+        "tml",
+        "toml",
+        "uv.lock"
+      ],
+      "files": [
+        {
+          "path": "TOML.sublime-syntax",
+          "sha256": "581328aea6c0028ab613ff26b3114c4ae37f9fa29f7be1042419ba353a6eabc6",
+          "size": 11558
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "87e6d5f3c4b540cbf3ae86bafce242a3cad366eb16799a123cde73b5ff5211f3",
+          "size": 1070
+        }
+      ],
+      "id": "filetype-toml",
+      "kind": "filetype",
+      "license": "MIT (see bundled LICENSE)",
+      "name": "TOML",
+      "recommends": [],
+      "source": "https://github.com/jasonwilliams/sublime_toml_highlighting/tree/f5a57e8bff694a4e6c52a491dae579aabc7427cf",
+      "version": "1.0.0"
+    },
+    {
       "description": "Syntax highlighting for XML.",
       "dir": "filetypes/filetype-xml",
       "extensions": [
