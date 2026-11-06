@@ -7,6 +7,9 @@
 //!
 //! `cargo xtask index` only rewrites the index, for edits to hand-written
 //! plugins under `plugins/features/`.
+//!
+//! `cargo xtask release` builds the app for release, with the builder's
+//! folders kept out of the binary.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -55,7 +58,8 @@ fn main() {
         "plugins" => build_plugins(),
         "index" => write_index(&repo_root()),
         "math" => build_math(&repo_root()),
-        _ => Err("usage: cargo xtask <plugins|index|math>".into()),
+        "release" => build_release(&repo_root()),
+        _ => Err("usage: cargo xtask <plugins|index|math|release>".into()),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -66,19 +70,7 @@ fn main() {
 /// Build the Math plugin's engine (crates/notey-math) to WebAssembly, put
 /// it in the plugin, and rewrite the index.
 fn build_math(root: &Path) -> Res<()> {
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    // panic messages name source files: keep the builder's folders (and
-    // user name) out of the published module
-    let cargo_home = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| {
-        std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(|h| PathBuf::from(h).join(".cargo"))
-    });
-    let mut flags = format!("--remap-path-prefix={}=/notey", root.display());
-    if let Some(home) = cargo_home {
-        flags = format!("--remap-path-prefix={}=/cargo\x1f{flags}", home.display());
-    }
-    let status = std::process::Command::new(cargo)
-        .current_dir(root)
-        .env("CARGO_ENCODED_RUSTFLAGS", flags)
+    let status = release_cargo(root)
         .args(["build", "--release", "-p", "notey-math", "--target", "wasm32-unknown-unknown"])
         .status()
         .map_err(|e| format!("cargo: {e}"))?;
@@ -90,6 +82,36 @@ fn build_math(root: &Path) -> Res<()> {
     fs::copy(&built, &dest).map_err(|e| format!("{}: {e}", built.display()))?;
     println!("wrote {}", dest.display());
     write_index(root)
+}
+
+/// Build target/release/notey.exe for the installer.
+fn build_release(root: &Path) -> Res<()> {
+    let status = release_cargo(root)
+        .args(["build", "--release", "-p", "notey"])
+        .status()
+        .map_err(|e| format!("cargo: {e}"))?;
+    if !status.success() {
+        return Err("the app did not build".into());
+    }
+    println!("built {}", root.join("target/release/notey.exe").display());
+    Ok(())
+}
+
+/// A cargo command whose build maps the repository and cargo's home to
+/// neutral names: panic messages name source files, and published builds
+/// must not carry the builder's folders (or user name).
+fn release_cargo(root: &Path) -> Command {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let cargo_home = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| {
+        std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(|h| PathBuf::from(h).join(".cargo"))
+    });
+    let mut flags = format!("--remap-path-prefix={}=/notey", root.display());
+    if let Some(home) = cargo_home {
+        flags = format!("--remap-path-prefix={}=/cargo\x1f{flags}", home.display());
+    }
+    let mut cmd = Command::new(cargo);
+    cmd.current_dir(root).env("CARGO_ENCODED_RUSTFLAGS", flags);
+    cmd
 }
 
 fn repo_root() -> PathBuf {

@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-05
+
 ### Added
 - Math, a new Feature plugin: live math in any tab, in the style of
   Calca. Write `=>` after a calculation and the result appears after it,
@@ -27,6 +29,10 @@ uses [Semantic Versioning](https://semver.org/).
   cursor and text styles elsewhere in place; and
   `notey.editor.set_history` makes a script's edits join the last undo
   step or stay out of the undo history.
+
+### Fixed
+- Release builds no longer contain file paths from the machine that built
+  them.
 
 ## [0.8.8] - 2026-11-05
 
@@ -354,7 +360,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/deepfold9118/notey/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/deepfold9118/notey/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/deepfold9118/notey/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/deepfold9118/notey/compare/v0.8.5...v0.8.6

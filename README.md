@@ -173,8 +173,9 @@ admin rights needed) and:
   (shown under "Show more options" on Windows 11)
 - optional desktop shortcut (unchecked by default)
 
-Rebuild the app first (`cargo build --release`) so the installer picks up the
-latest exe.
+Rebuild the app first with `cargo xtask release` so the installer picks up
+the latest exe. It is `cargo build --release` with the builder's folders
+mapped out of the binary's panic messages.
 
 ## Notes
 
