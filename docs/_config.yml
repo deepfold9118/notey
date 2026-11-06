@@ -1,0 +1,3 @@
+title: Notey
+description: A native Rust notepad for Windows with dark mode, tabs, plugins and live math.
+theme: jekyll-theme-cayman

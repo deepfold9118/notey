@@ -3,7 +3,7 @@
 > **Implementation status (November 2026, API 4):** Rhai scripts are live
 > in `src/plugins.rs`. They come from two places: your own scripts in
 > `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
-> Plugins window (see [`plugins/README.md`](../plugins/README.md)). The
+> Plugins window (see [`plugins/README.md`](https://github.com/deepfold9118/notey/blob/main/plugins/README.md)). The
 > official Markdown Tools, Word Count, Autocorrect, Export & Print and
 > Math plugins in `plugins/features/` are working examples of everything
 > below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
