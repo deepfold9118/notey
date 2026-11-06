@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-06
+
 ### Added
 - Syntax Check, a new Feature plugin: when you pause typing, it shows
   where the syntax might be wrong. JSON, YAML, TOML and XML go through a
@@ -442,7 +444,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/deepfold9118/notey/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/deepfold9118/notey/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/deepfold9118/notey/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/deepfold9118/notey/compare/v0.9.0...v0.10.0
