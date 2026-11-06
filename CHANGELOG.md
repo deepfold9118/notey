@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-05
+
 ### Added
 - Tabs have a right-click menu: Pin Tab, Color, Open in Split View, Close
   Tab, Close Other Tabs, Close Tabs to the Right, Copy Path and Show in
@@ -383,7 +385,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/deepfold9118/notey/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/deepfold9118/notey/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/deepfold9118/notey/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/deepfold9118/notey/compare/v0.8.6...v0.8.7
