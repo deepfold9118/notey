@@ -6,6 +6,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Python with type hints (`count: int = 10`, `def f(a: int) -> float:`) is
+  recognized from its text; a short typed script stayed Plain Text.
+
 ## [0.10.0] - 2026-11-05
 
 ### Added
