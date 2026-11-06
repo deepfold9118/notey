@@ -46,10 +46,13 @@ mod tests {
         assert_eq!(undone.unwrap().doc().to_string(), "2+2 ");
     }
 }
+use crate::problems::{visible_range, Problem, SetProblems, Severity, SET_PROBLEMS};
 use crate::styles::{StyleChange, STYLE_RANGE};
 
 /// `text_changed` events come at most this often.
 const TEXT_EVENT_INTERVAL: Duration = Duration::from_millis(250);
+/// `text_idle` comes when the text has not changed for this long.
+const TEXT_IDLE: Duration = Duration::from_millis(700);
 
 /// Plugin state of the app.
 #[derive(Default)]
@@ -59,6 +62,7 @@ pub(super) struct Scripting {
     pub(super) status_items: Vec<(String, String, String)>,
     text_changed_pending: bool,
     text_timer: Option<Task<()>>,
+    idle_timer: Option<Task<()>>,
     last_text_event: Option<Instant>,
     last_selection: Option<(u64, (usize, usize))>,
     ready_fired: bool,
@@ -166,6 +170,7 @@ impl NoteyApp {
 
     /// Apply what a script did to the tab it ran on.
     fn apply_script_result(&mut self, doc_id: u64, out: ScriptCtx, window: &mut Window, cx: &mut Context<Self>) {
+        let (error_color, hint_color) = (self.palette.error, self.palette.warning);
         if let Some(idx) = self.tab_index(doc_id) {
             let view = self.tabs[idx].view.clone();
             view.update(cx, |view, cx| {
@@ -238,6 +243,27 @@ impl NoteyApp {
                 for op in &out.styles {
                     let (from, to) = (char_to_byte(&out.text, op.start), char_to_byte(&out.text, op.end));
                     spec = spec.effect(STYLE_RANGE.of(StyleChange { from, to, fg: op.fg, bg: op.bg }));
+                    any = true;
+                }
+                // Problems, in offsets of the script's text like the styles.
+                if let Some(ops) = &out.problems {
+                    let text = &out.text;
+                    let problems = ops
+                        .iter()
+                        .map(|op| {
+                            let (from, to) =
+                                visible_range(text, char_to_byte(text, op.start), char_to_byte(text, op.end));
+                            Problem {
+                                from,
+                                to,
+                                severity: if op.error { Severity::Error } else { Severity::Hint },
+                                message: op.message.clone(),
+                                bar: op.bar,
+                                color: if op.error { error_color } else { hint_color },
+                            }
+                        })
+                        .collect();
+                    spec = spec.effect(SET_PROBLEMS.of(SetProblems { source: out.script_name.clone(), problems }));
                     any = true;
                 }
                 if any {
@@ -466,6 +492,14 @@ impl NoteyApp {
         if doc_changed {
             self.scripting.text_changed_pending = true;
             self.schedule_text_event(window, cx);
+            // `text_idle` once the typing pauses (each change starts it over)
+            self.scripting.idle_timer = Some(cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(TEXT_IDLE).await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.scripting.idle_timer = None;
+                    this.fire_event("text_idle", None, window, cx);
+                });
+            }));
         }
         let Some(tab) = self.tabs.get(self.active) else { return };
         let main = tab.state(cx).selection().main();

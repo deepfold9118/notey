@@ -7,6 +7,19 @@ uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Syntax Check, a new Feature plugin: when you pause typing, it shows
+  where the syntax might be wrong. JSON, YAML, TOML and XML go through a
+  real parser, so a mistake there is an error (JSON with comments, such as
+  `settings.json`, may have comments and trailing commas). Code in 20
+  languages gets hints for unmatched brackets and quotes; brackets inside
+  strings and comments don't count. Problems get a wavy underline in the
+  theme's error or warning color.
+- The problem bar, above the status bar: while the tab has problems, it
+  shows the one nearest the cursor. Click it to go there, step through
+  the problems with the arrows, or hide it until a new problem shows up.
+  Screen readers read it when it appears.
+- Plugin API 7: `notey.editor.set_problems` and `clear_problems`, and the
+  `text_idle` event, which comes when the typing pauses.
 - TOML, a new File Type plugin (.toml, Cargo.lock, Pipfile, poetry.lock
   and other TOML files), installed by default. An untitled tab with TOML
   text is recognized too, while INI files still stay plain text.

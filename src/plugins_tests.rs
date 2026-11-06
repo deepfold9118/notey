@@ -351,3 +351,27 @@ fn scripts_get_the_egui_key_names() {
     assert_eq!(crate::plugins::script_key_name("backspace"), "Backspace");
 }
 
+
+#[test]
+fn syntax_check_reports_problems_for_the_bar() {
+    let mut host = official("feature-syntax-check");
+    let mut c = ctx("{\n  \"a\": 1\n  \"b\": 2\n}", (0, 0), Some("JSON"));
+    c.buffers[0].path = Some(r"C:\work\data.json".into());
+    let out = host.run_event(0, event("text_idle", None), c);
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+    let problems = out.problems.expect("problems");
+    assert_eq!(problems.len(), 1);
+    assert!(problems[0].error && problems[0].bar);
+    assert_eq!(problems[0].start, 13);
+    assert!(problems[0].message.starts_with("Invalid JSON"), "{}", problems[0].message);
+
+    // Bracket hints in code; with the bar on errors only, they stay out of it.
+    host.store.entry("Syntax Check".into()).or_default().insert("bar".into(), "errors".into());
+    let out = host.run_event(0, event("text_idle", None), ctx("fn main() {\n", (0, 0), Some("Rust")));
+    let problems = out.problems.expect("problems");
+    assert_eq!(problems.len(), 1);
+    assert!(!problems[0].error && !problems[0].bar);
+    // Fixed text clears them.
+    let out = host.run_event(0, event("text_idle", None), ctx("fn main() {}\n", (0, 0), Some("Rust")));
+    assert_eq!(out.problems, Some(vec![]));
+}

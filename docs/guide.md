@@ -110,7 +110,7 @@ Settings > Plugins:
 
 - **Features**: Spellcheck, Markdown Tools (formatting shortcuts, list
   continuation and a rendered preview), Word Count, Autocorrect, Text
-  Color, Tab Colors, Terminal, Export & Print, and
+  Color, Tab Colors, Terminal, Syntax Check, Export & Print, and
   [Math](https://github.com/deepfold9118/notey/blob/main/plugins/features/feature-math/README.md).
 - **Languages**: spellcheck dictionaries for 16 languages. A word is
   accepted if any enabled language knows it. Right-click a misspelled word
@@ -153,8 +153,31 @@ it. The window stays open afterwards, so you can read the output.
 Settings > Terminal (shown while the plugin is enabled) picks the terminal
 app and the shell from what is installed, or Other with a path, and lets
 you change the command for each kind of file, for example to use a
-particular Python. The plugin asks for permission to start programs when
-you install it.
+particular Python. The plugin list shows that the plugin can start
+programs.
+
+### Syntax Check
+
+The Syntax Check plugin shows where the syntax might be wrong, each time
+you pause typing:
+
+- **JSON, YAML, TOML and XML** go through a real parser, so a mistake
+  there is an error, such as a missing comma. JSON with comments, such as
+  VS Code's `settings.json` and `tsconfig.json`, may have comments and
+  trailing commas.
+- **Code** gets hints for a bracket that is never closed, a closing
+  bracket with no opener or of the wrong kind, and a string or comment
+  left open. Brackets inside strings and comments don't count. This works
+  for C, C++, C#, Java, JavaScript, Go, Rust, Python, Lua, CSS, SQL,
+  Scala, Groovy, D, R, Haskell, OCaml, Clojure, Lisp and Objective-C.
+  The hints mean "might be wrong", not "is wrong".
+
+Problems get a wavy underline: errors in the theme's error color, hints in
+its warning color. The bar above the status bar shows the problem nearest
+the cursor. Click the message to go to it, use the arrows to step through
+the problems, or click the ✕ to hide the bar until a new problem shows
+up. Settings > Syntax Check chooses what the bar shows (errors and hints,
+errors only, or nothing) and turns the bracket hints off.
 
 ### Your own scripts
 

@@ -132,7 +132,10 @@ Notey keeps its core minimal; everything else is a plugin, managed from
 - **Features** — Spellcheck, Markdown Tools (Ctrl+B/I/E/K formatting, list
   continuation, rendered and side-by-side preview), Word Count, Autocorrect,
   Text Color, Tab Colors, Terminal (Open in Terminal and Run in Terminal
-  for a tab, with your choice of terminal app and shell), Export & Print
+  for a tab, with your choice of terminal app and shell), Syntax Check
+  (errors in JSON, YAML, TOML and XML, and hints for unmatched brackets
+  and quotes in code, shown when you pause typing, with a problem bar
+  above the status bar), Export & Print
   (HTML export, formatted printing via your browser), and Math (live math in any tab in the style of
   [Calca](https://calca.io): `price * 3 =>` writes the result, with symbolic
   algebra, solving, derivatives, matrices and currency conversion; see

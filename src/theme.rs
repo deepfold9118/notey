@@ -37,6 +37,9 @@ pub struct Palette {
     pub find_match_selected: Hsla,
     /// The named colors (`COLOR_NAMES`): a VS Code theme's terminal colors.
     pub named: [Hsla; 6],
+    /// Problem underlines and the problem bar: errors and hints.
+    pub error: Hsla,
+    pub warning: Hsla,
 }
 
 /// Colors that plugins can name (tab colors, swatches), so that they follow
@@ -88,6 +91,9 @@ pub fn palette(dark: bool) -> Palette {
             find_match_selected: rgba(0xE8892FAA).into(),
             // VS Code's Dark+ terminal colors
             named: [0xcd3131, 0xe5e510, 0x0dbc79, 0x11a8cd, 0x2472c8, 0xbc3fbc].map(|c| rgb(c).into()),
+            // VS Code's Dark+ editorError / editorWarning foregrounds
+            error: rgb(0xF14C4C).into(),
+            warning: rgb(0xCCA700).into(),
         }
     } else {
         Palette {
@@ -109,6 +115,9 @@ pub fn palette(dark: bool) -> Palette {
             find_match_selected: rgba(0xFF9E40AA).into(),
             // VS Code's Light+ terminal colors
             named: [0xcd3131, 0x949800, 0x00bc00, 0x0598bc, 0x0451a5, 0xbc05bc].map(|c| rgb(c).into()),
+            // VS Code's Light+ editorError / editorWarning foregrounds
+            error: rgb(0xE51400).into(),
+            warning: rgb(0xBF8803).into(),
         }
     }
 }

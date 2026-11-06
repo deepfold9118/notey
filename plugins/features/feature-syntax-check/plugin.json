@@ -1,0 +1,11 @@
+{
+  "id": "feature-syntax-check",
+  "kind": "feature",
+  "name": "Syntax Check",
+  "version": "1.0.0",
+  "description": "Shows where the syntax might be wrong when you pause typing: errors in JSON, YAML, TOML and XML, and hints for unmatched brackets and quotes in code. Problems are underlined, and a bar above the status bar shows the one nearest the cursor.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "capabilities": [],
+  "files": ["main.rhai", "syntax.wasm"]
+}

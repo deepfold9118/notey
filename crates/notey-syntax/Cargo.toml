@@ -1,0 +1,17 @@
+[package]
+name = "notey-syntax"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The engine of Notey's Syntax Check plugin: syntax errors in JSON, YAML, TOML and XML, and unmatched brackets and quotes in code, built to WebAssembly"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+yaml-rust2 = { version = "0.10", default-features = false }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+roxmltree = { version = "0.20", default-features = false, features = ["std"] }

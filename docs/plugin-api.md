@@ -1,11 +1,11 @@
 # Notey Plugin API
 
-> **Implementation status (November 2026, API 6):** Rhai scripts are live
+> **Implementation status (November 2026, API 7):** Rhai scripts are live
 > in `src/plugins.rs`. They come from two places: your own scripts in
 > `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
 > Plugins window (see [`plugins/README.md`](https://github.com/deepfold9118/notey/blob/main/plugins/README.md)). The
 > official Markdown Tools, Word Count, Autocorrect, Export & Print, Math,
-> Tab Colors and Terminal plugins in `plugins/features/` are working
+> Tab Colors, Terminal and Syntax Check plugins in `plugins/features/` are working
 > examples of everything below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
 > not as plugins of their own. Not yet implemented: pos/line conversions,
 > `begin_undo_group`/`end_undo_group` (`set_history` covers plugin
@@ -14,6 +14,25 @@
 >
 > **Scope note:** `notey` is available in every function of a script,
 > including your own helper functions.
+
+## API 7 additions (quick reference)
+
+| Call or event | Notes |
+|---|---|
+| `notey.editor.set_problems([#{ start, end, message, severity, bar }, ...])` | the script's problems in the buffer, replacing its earlier ones. `start`/`end` are offsets of the current text; an empty range marks one character. `severity` is `"error"` (the default) or `"hint"`; `bar: false` keeps a problem out of the problem bar |
+| `notey.editor.clear_problems()` | remove the script's problems from the buffer |
+| `text_idle` event | the text has not changed for 0.7 seconds: the time to check it |
+
+Problems get a wavy underline in the theme's error or warning color
+(`editorError.foreground`, `editorWarning.foreground`), and they move with
+the text until the script sets them again. The problem bar, above the
+status bar, shows the one nearest the cursor while the active tab has any.
+Each script's problems are its own, so several checkers can work on one
+tab. The official Syntax Check plugin
+(`plugins/features/feature-syntax-check`) is an example: it checks in a
+WebAssembly module on `ready`, `buffer_opened`, `buffer_activated` and
+`text_idle`. Its `ready` can come before an opened file's language is known
+(the grammars load after it), so it also goes by the file's extension.
 
 ## API 6 additions (quick reference)
 
@@ -307,6 +326,7 @@ Subscribed in the manifest; delivered as `{ kind, buffer_id?, ...payload }`.
 | `file_changed_on_disk` | `path` | NPPN_FILEDELETED etc. |
 | `selection_changed` | `range` — throttled | SCN_UPDATEUI |
 | `text_changed` | `revision` — batched per frame, never per keystroke | SCN_MODIFIED |
+| `text_idle` | the text has not changed for 0.7 s (API 7) | |
 | `theme_changed` | `dark: bool` | NPPN_DARKMODECHANGED |
 
 Reentrancy rule: event handlers may call any API; mutations from `before_save`

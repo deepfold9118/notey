@@ -103,6 +103,29 @@
       "version": "1.0.0"
     },
     {
+      "capabilities": [],
+      "description": "Shows where the syntax might be wrong when you pause typing: errors in JSON, YAML, TOML and XML, and hints for unmatched brackets and quotes in code. Problems are underlined, and a bar above the status bar shows the one nearest the cursor.",
+      "dir": "features/feature-syntax-check",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "e9c3f8bd9b6685929f86646da4656d3ec551fdfb7bca8ea809dd772adc08e350",
+          "size": 1910
+        },
+        {
+          "path": "syntax.wasm",
+          "sha256": "d0b53cd8bcb9d1f947a4d83de0c13a3b98f126cfce941e56d98f9c709fea0056",
+          "size": 527529
+        }
+      ],
+      "id": "feature-syntax-check",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Syntax Check",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
       "description": "Gives tabs a color from the tab's right-click menu (Color), drawn as a stripe on the tab, in the theme's colors. A file keeps its color the next time it opens.",
       "dir": "features/feature-tab-colors",
       "files": [

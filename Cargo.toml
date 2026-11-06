@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "xtask", "crates/notey-math"]
+members = [".", "xtask", "crates/notey-math", "crates/notey-syntax"]
 
 [package]
 name = "notey"

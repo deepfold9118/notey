@@ -12,6 +12,7 @@ mod markdown;
 #[allow(dead_code)]
 mod packages;
 mod plugins;
+mod problems;
 mod prompt;
 mod search;
 mod session;

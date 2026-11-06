@@ -37,6 +37,7 @@ const FIND_FIELD: NodeId = NodeId(22);
 const REPLACE_FIELD: NodeId = NodeId(23);
 const STATUS_BAR: NodeId = NodeId(30);
 const GEAR: NodeId = NodeId(31);
+const PROBLEM_BAR: NodeId = NodeId(32);
 const SETTINGS: NodeId = NodeId(50);
 const SETTINGS_TAB: NodeId = NodeId(60);
 const DIALOG: NodeId = NodeId(70);
@@ -44,6 +45,8 @@ const DIALOG_TEXT: NodeId = NodeId(71);
 /// Ranges of ids for lists.
 const MENU_ITEM: u64 = 100;
 const FIND_BUTTON: u64 = 200;
+/// Previous, next and hide in the problem bar.
+const PROBLEM_BUTTON: u64 = 250;
 const STATUS_ITEM: u64 = 300;
 const SECTION: u64 = 400;
 const CONTROL: u64 = 500;
@@ -212,6 +215,24 @@ impl NoteyApp {
                 }
                 nodes.push((FIND_BAR, bar));
             }
+        }
+
+        // The problem bar: read out when it appears or changes.
+        if let Some((list, current)) = self.problem_bar_shown(cx) {
+            let text = format!(
+                "{}{}",
+                self.problem_text(&list[current]),
+                if list.len() > 1 { format!(" ({} of {})", current + 1, list.len()) } else { String::new() }
+            );
+            let mut bar = node(Role::Alert, text);
+            bar.set_live(accesskit::Live::Polite);
+            for (i, label) in ["Previous problem", "Next problem", "Hide problems"].iter().enumerate() {
+                let id = NodeId(PROBLEM_BUTTON + i as u64);
+                bar.push_child(id);
+                nodes.push((id, button(*label)));
+            }
+            root.push_child(PROBLEM_BAR);
+            nodes.push((PROBLEM_BAR, bar));
         }
 
         // Status bar.
@@ -505,6 +526,11 @@ impl NoteyApp {
             }
             (FIND_FIELD, Action::Focus) => find::select_field(&self.find.find.clone(), window, cx),
             (REPLACE_FIELD, Action::Focus) => find::select_field(&self.find.replace.clone(), window, cx),
+            (_, Action::Click) if (PROBLEM_BUTTON..STATUS_ITEM).contains(&id) => match id - PROBLEM_BUTTON {
+                0 => self.step_problem(false, window, cx),
+                1 => self.step_problem(true, window, cx),
+                _ => self.hide_problems(cx),
+            },
             (_, Action::Click) if (FIND_BUTTON..STATUS_ITEM).contains(&id) => {
                 let action: Box<dyn gpui::Action> = match id - FIND_BUTTON {
                     0 => Box::new(find::FindPrevious),

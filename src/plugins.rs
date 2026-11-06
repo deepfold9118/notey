@@ -27,7 +27,9 @@ use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope, AST};
 /// 6: plugin settings (manifest `settings`, `notey.settings.get`),
 /// `notey.process.start` (capability-gated), `notey.fs.exists`,
 /// `notey.app.which` and `notey.app.env`.
-pub const API_VERSION: i64 = 6;
+/// 7: problems (`set_problems`, `clear_problems`) shown as underlines and
+/// in the problem bar, and the `text_idle` event.
+pub const API_VERSION: i64 = 7;
 
 /// Permissions a script must declare (and, for installed plugins, the
 /// package must grant) before it can use the matching API.
@@ -152,6 +154,19 @@ pub struct ScriptCtx {
     pub tab_color: String,
     /// The running script's settings (see `plugin_settings`).
     pub settings: std::collections::BTreeMap<String, String>,
+    /// The script's problems in this buffer (char offsets of the script's
+    /// text), replacing its earlier ones; `None` leaves them as they are.
+    pub problems: Option<Vec<ProblemOp>>,
+}
+
+/// A problem a script reports (API 7).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProblemOp {
+    pub start: usize,
+    pub end: usize,
+    pub error: bool,
+    pub message: String,
+    pub bar: bool,
 }
 
 /// Set or clear the colors of a char range of the script's text.
@@ -552,6 +567,7 @@ fn join(parts, sep) {
                     sel_quiet: c.sel_quiet,
                     tab_color: c.tab_color.clone(),
                     settings: c.settings.clone(),
+                    problems: c.problems.take(),
                 }
             }
         };
@@ -1300,6 +1316,36 @@ fn api_engine(ctx: Ctx) -> Engine {
         let max = c.text.chars().count();
         let (a, b) = map_range(&r, max);
         c.styles.push(StyleOp { start: a.min(b), end: a.max(b), fg: Change::Clear, bg: Change::Clear });
+    });
+
+    // ---- editor (API 7): problems ----
+    engine.register_fn("set_problems", |e: &mut EditorApi, list: Array| -> ApiResult<()> {
+        let mut c = e.ctx.borrow_mut();
+        let max = c.text.chars().count();
+        let mut out = Vec::with_capacity(list.len());
+        for item in list {
+            let Some(m) = item.try_cast::<Map>() else {
+                return Err("set_problems takes a list of #{ start, end, message }".into());
+            };
+            let (a, b) = map_range(&m, max);
+            let text = |k: &str| m.get(k).and_then(|v| v.clone().into_string().ok());
+            let severity = text("severity").unwrap_or_else(|| "error".into());
+            if severity != "error" && severity != "hint" {
+                return Err(format!("unknown severity \"{severity}\" (use \"error\" or \"hint\")").into());
+            }
+            out.push(ProblemOp {
+                start: a.min(b),
+                end: a.max(b),
+                error: severity == "error",
+                message: text("message").unwrap_or_default(),
+                bar: m.get("bar").and_then(|v| v.as_bool().ok()).unwrap_or(true),
+            });
+        }
+        c.problems = Some(out);
+        Ok(())
+    });
+    engine.register_fn("clear_problems", |e: &mut EditorApi| {
+        e.ctx.borrow_mut().problems = Some(Vec::new());
     });
 
     // ---- text helpers (API 2): fast host implementations ----

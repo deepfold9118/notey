@@ -8,6 +8,9 @@
 //! `cargo xtask index` only rewrites the index, for edits to hand-written
 //! plugins under `plugins/features/`.
 //!
+//! `cargo xtask math` and `cargo xtask syntax` build the WebAssembly
+//! engines of the Math and Syntax Check plugins.
+//!
 //! `cargo xtask release` builds the app for release, with the builder's
 //! folders kept out of the binary.
 
@@ -67,8 +70,9 @@ fn main() {
         "plugins" => build_plugins(),
         "index" => write_index(&repo_root()),
         "math" => build_math(&repo_root()),
+        "syntax" => build_syntax(&repo_root()),
         "release" => build_release(&repo_root()),
-        _ => Err("usage: cargo xtask <plugins|index|math|release>".into()),
+        _ => Err("usage: cargo xtask <plugins|index|math|syntax|release>".into()),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -79,15 +83,26 @@ fn main() {
 /// Build the Math plugin's engine (crates/notey-math) to WebAssembly, put
 /// it in the plugin, and rewrite the index.
 fn build_math(root: &Path) -> Res<()> {
+    build_engine(root, "notey-math", "feature-math/math.wasm")
+}
+
+/// Build the Syntax Check plugin's engine (crates/notey-syntax).
+fn build_syntax(root: &Path) -> Res<()> {
+    build_engine(root, "notey-syntax", "feature-syntax-check/syntax.wasm")
+}
+
+/// Build a plugin engine crate to WebAssembly, copy it to
+/// `plugins/features/<dest>`, and rewrite the index.
+fn build_engine(root: &Path, krate: &str, dest: &str) -> Res<()> {
     let status = release_cargo(root)
-        .args(["build", "--release", "-p", "notey-math", "--target", "wasm32-unknown-unknown"])
+        .args(["build", "--release", "-p", krate, "--target", "wasm32-unknown-unknown"])
         .status()
         .map_err(|e| format!("cargo: {e}"))?;
     if !status.success() {
         return Err("the engine did not build (rustup target add wasm32-unknown-unknown)".into());
     }
-    let built = root.join("target/wasm32-unknown-unknown/release/notey_math.wasm");
-    let dest = root.join("plugins/features/feature-math/math.wasm");
+    let built = root.join(format!("target/wasm32-unknown-unknown/release/{}.wasm", krate.replace('-', "_")));
+    let dest = root.join("plugins/features").join(dest);
     fs::copy(&built, &dest).map_err(|e| format!("{}: {e}", built.display()))?;
     println!("wrote {}", dest.display());
     write_index(root)

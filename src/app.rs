@@ -15,6 +15,7 @@ mod tabs;
 mod themes;
 mod plugins_ui;
 mod preview;
+mod problem_bar;
 mod scripting;
 mod watch;
 
@@ -136,6 +137,8 @@ struct Tab {
     /// The tab's color, set by a plugin: a name from `theme::COLOR_NAMES`
     /// (the theme decides the color) or "#rrggbb".
     color: Option<String>,
+    /// The problem bar is hidden: the messages it had then.
+    problems_hidden: Option<Vec<String>>,
     _observe: Subscription,
 }
 
@@ -420,6 +423,7 @@ impl NoteyApp {
                 }
             })),
             crate::styles::text_styles(),
+            crate::problems::problems(),
             self.config.of(self.editor_config(doc.language.as_deref())),
         ]);
         let state = EditorState::create(EditorStateConfig::new().doc(text).extensions(extensions));
@@ -440,6 +444,7 @@ impl NoteyApp {
             detecting: None,
             pinned: false,
             color: None,
+            problems_hidden: None,
             _observe: observe,
         };
         tab.refresh(state, true);
@@ -1049,8 +1054,17 @@ impl Render for NoteyApp {
         if self.script_events_due() {
             cx.defer_in(window, |this, window, cx| this.flush_script_events(window, cx));
         }
-        // The document area, with Find in Files below it.
-        let main = div().flex_1().min_h_0().min_w_0().flex().flex_col().child(body).children(self.find_in_files_panel(cx));
+        // The document area, with Find in Files and the problem bar below it.
+        let problem_bar = self.problem_bar(cx);
+        let main = div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(body)
+            .children(self.find_in_files_panel(cx))
+            .children(problem_bar);
         let main = if self.settings.tabs_left {
             div().flex_1().min_h_0().flex().child(self.left_tab_panel(cx)).child(main).into_any_element()
         } else {
