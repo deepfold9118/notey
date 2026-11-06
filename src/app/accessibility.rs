@@ -317,6 +317,15 @@ impl NoteyApp {
             settings.push_child(id);
             nodes.push((id, n));
         }
+        // Plugin sections follow the built-in ones.
+        for (k, (i, name)) in self.plugin_sections().into_iter().enumerate() {
+            let id = NodeId(SECTION + (Section::ALL.len() + k) as u64);
+            let mut n = node(Role::Tab, name.to_string());
+            n.set_selected(self.settings_ui.section == Section::Plugin(i));
+            n.add_action(Action::Click);
+            settings.push_child(id);
+            nodes.push((id, n));
+        }
         for (i, control) in self.settings_controls().into_iter().enumerate() {
             let id = NodeId(CONTROL + i as u64);
             let n = match control {
@@ -428,6 +437,32 @@ impl NoteyApp {
                     }
                 })
                 .collect(),
+            // A plugin's settings: switches, and the other values as text.
+            Section::Plugin(i) => {
+                let Some(script) = self.scripting.host.scripts.get(i) else { return Vec::new() };
+                let values = self.scripting.host.setting_values(i);
+                script
+                    .settings
+                    .iter()
+                    .filter(|s| crate::plugin_settings::visible(s, &values))
+                    .map(|s| {
+                        let value = values.get(&s.id).cloned().unwrap_or_default();
+                        if s.kind == crate::plugin_settings::Kind::Toggle {
+                            let (id, on) = (s.id.clone(), value == "true");
+                            Control::Toggle {
+                                label: s.title.clone().into(),
+                                on,
+                                flip: Rc::new(move |this, _, cx| {
+                                    this.scripting.host.set_setting(i, &id, if on { "false" } else { "true" });
+                                    cx.notify();
+                                }),
+                            }
+                        } else {
+                            Control::Text(format!("{}: {value}", s.title).into())
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 
@@ -483,8 +518,11 @@ impl NoteyApp {
                 }
             }
             (_, Action::Click) if (SECTION..CONTROL).contains(&id) => {
-                if let Some(s) = Section::ALL.get((id - SECTION) as usize) {
+                let k = (id - SECTION) as usize;
+                if let Some(s) = Section::ALL.get(k) {
                     self.settings_ui.section = *s;
+                } else if let Some((i, _)) = self.plugin_sections().get(k - Section::ALL.len()) {
+                    self.settings_ui.section = Section::Plugin(*i);
                 }
             }
             (_, action) if (CONTROL..DIALOG_BUTTON).contains(&id) => {

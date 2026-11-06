@@ -93,6 +93,11 @@ impl NoteyApp {
             .collect();
         crate::wasm_host::reset();
         self.scripting.host = PluginHost::load(&feature_scripts);
+        // plugin settings sections are by script index
+        self.settings_ui.forget_plugins();
+        if matches!(self.settings_ui.section, super::settings_tab::Section::Plugin(_)) {
+            self.settings_ui.section = super::settings_tab::Section::Editor;
+        }
         if report {
             let n = self.scripting.host.scripts.len();
             self.flash(format!("Loaded {n} script{}", if n == 1 { "" } else { "s" }), cx);
@@ -108,14 +113,14 @@ impl NoteyApp {
         self.reload_scripts(false, cx);
     }
 
-    fn surface_plugin_errors(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn surface_plugin_errors(&mut self, cx: &mut Context<Self>) {
         if let Some(err) = self.scripting.host.errors.pop() {
             self.scripting.host.errors.clear();
             self.flash(format!("Plugin error: {err}"), cx);
         }
     }
 
-    fn script_snapshot(&self, cx: &App) -> Option<ScriptCtx> {
+    pub(super) fn script_snapshot(&self, cx: &App) -> Option<ScriptCtx> {
         self.script_snapshot_of(self.active, cx)
     }
 
@@ -246,6 +251,8 @@ impl NoteyApp {
         for action in out.actions {
             match action {
                 HostAction::SetTabColor(color) => self.set_tab_color(doc_id, color, cx),
+                // the script's tab, which a tab menu command need not have active
+                HostAction::SaveActive => self.save_by_id(doc_id, cx).detach(),
                 action => self.host_action(action, window, cx),
             }
         }
@@ -304,6 +311,26 @@ impl NoteyApp {
             HostAction::ClearStatusItem(key) => self.scripting.status_items.retain(|(k, _, _)| *k != key),
             HostAction::Fetch(url) => self.plugin_fetch(url, window, cx),
             HostAction::SetTabColor(_) => {}
+            HostAction::Start(program, args, dir) => self.start_program(&program, &args, dir.as_deref(), cx),
+        }
+    }
+
+    /// Start a program for a plugin. A console program gets a console
+    /// window of its own.
+    fn start_program(&mut self, program: &str, args: &[String], dir: Option<&Path>, cx: &mut Context<Self>) {
+        let mut command = std::process::Command::new(program);
+        command.args(args);
+        if let Some(dir) = dir.filter(|d| d.is_dir()) {
+            command.current_dir(dir);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_CONSOLE: u32 = 0x10;
+            command.creation_flags(CREATE_NEW_CONSOLE);
+        }
+        if let Err(e) = command.spawn() {
+            self.flash(format!("Could not start {program}: {e}"), cx);
         }
     }
 

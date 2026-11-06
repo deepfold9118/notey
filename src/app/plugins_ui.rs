@@ -332,7 +332,10 @@ impl NoteyApp {
                 div()
                     .text_size(px(11.))
                     .text_color(gpui::rgb(0xD6A03C))
-                    .child(format!("Permissions: {}", m.capabilities.join(", "))),
+                    .child(format!(
+                        "Permissions: {}",
+                        m.capabilities.iter().map(|c| permission_label(c)).collect::<Vec<_>>().join(", ")
+                    )),
             );
         }
         let mut controls = div().flex().flex_none().items_center().gap_2();
@@ -384,5 +387,16 @@ impl NoteyApp {
             .border_color(p.stroke)
             .child(info)
             .child(controls)
+    }
+}
+
+/// What a plugin permission lets it do, in plain words.
+fn permission_label(cap: &str) -> String {
+    match cap {
+        crate::plugins::CAP_FS_WRITE => "write files".into(),
+        crate::plugins::CAP_OPEN => "open files and links in other apps".into(),
+        crate::plugins::CAP_NET => "download from the internet".into(),
+        crate::plugins::CAP_RUN => "start programs (it can run anything you could)".into(),
+        other => other.to_string(),
     }
 }

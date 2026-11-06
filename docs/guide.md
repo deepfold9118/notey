@@ -110,7 +110,7 @@ Settings > Plugins:
 
 - **Features**: Spellcheck, Markdown Tools (formatting shortcuts, list
   continuation and a rendered preview), Word Count, Autocorrect, Text
-  Color, Tab Colors, Export & Print, and
+  Color, Tab Colors, Terminal, Export & Print, and
   [Math](https://github.com/deepfold9118/notey/blob/main/plugins/features/feature-math/README.md).
 - **Languages**: spellcheck dictionaries for 16 languages. A word is
   accepted if any enabled language knows it. Right-click a misspelled word
@@ -139,6 +139,22 @@ unknown, derivatives, matrices, and currency conversion with the European
 Central Bank's daily rates. Edit > Math turns it off for a tab. See the
 [Math reference](https://github.com/deepfold9118/notey/blob/main/plugins/features/feature-math/README.md)
 for everything it can do.
+
+### Terminal
+
+With the Terminal plugin, a tab's right-click menu has **Open in
+Terminal**, which opens a shell in the file's folder, and **Run in
+Terminal** (Ctrl+F5 for the active tab), which runs the file: Python with
+`py`, JavaScript with `node`, PowerShell scripts, batch files, shell
+scripts, Ruby, Lua, Perl and Go. Running saves the file first; an
+untitled tab runs from a temporary copy, so you can jot some code and run
+it. The window stays open afterwards, so you can read the output.
+
+Settings > Terminal (shown while the plugin is enabled) picks the terminal
+app and the shell from what is installed, or Other with a path, and lets
+you change the command for each kind of file, for example to use a
+particular Python. The plugin asks for permission to start programs when
+you install it.
 
 ### Your own scripts
 

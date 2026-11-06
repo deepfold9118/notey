@@ -427,7 +427,7 @@ impl NoteyApp {
             }))
     }
 
-    pub(super) fn field(&self, id: &'static str, view: &Entity<EditorView>, cx: &App) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn field(&self, id: impl Into<gpui::ElementId>, view: &Entity<EditorView>, cx: &App) -> gpui::Stateful<gpui::Div> {
         let p = self.palette;
         let focused = view.read(cx).has_focus();
         div()

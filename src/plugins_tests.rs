@@ -15,10 +15,7 @@ fn official(id: &str) -> PluginHost {
         .unwrap_or_default();
     let script = PluginHost::load_script(&dir.join("main.rhai"), Some(&granted))
         .unwrap_or_else(|e| panic!("{id}: {e}"));
-    PluginHost {
-        scripts: vec![script],
-        errors: Vec::new(),
-    }
+    PluginHost { scripts: vec![script], ..PluginHost::default() }
 }
 
 fn ctx(text: &str, sel: (usize, usize), language: Option<&str>) -> ScriptCtx {
@@ -162,6 +159,36 @@ fn word_count_sets_a_status_item() {
 }
 
 #[test]
+fn terminal_saves_then_runs_the_file_in_the_chosen_shell() {
+    let mut host = official("feature-terminal");
+    let settings = &host.scripts[0].settings;
+    assert!(settings.iter().any(|s| s.id == "terminal" && s.choices_fn.as_deref() == Some("terminal_choices")));
+    assert!(settings.iter().any(|s| s.id == "cmd_python"));
+    // the Command Prompt in a console window: there on every Windows PC
+    let chosen = [("shell", "cmd"), ("terminal", "console")].map(|(k, v)| (k.to_string(), v.to_string()));
+    host.store.entry("Terminal".into()).or_default().extend(chosen);
+    let mut c = ctx("print(1)", (0, 0), Some("Python"));
+    c.buffers[0].path = Some(r"C:\work\hello world.py".into());
+    c.buffers[0].modified = true;
+    let out = host.run_command(0, "run", c);
+    assert!(host.errors.is_empty(), "{:?}", host.errors);
+    match out.actions.as_slice() {
+        [HostAction::SaveActive, HostAction::Start(program, args, dir)] => {
+            assert!(program.to_lowercase().ends_with("cmd.exe"), "{program}");
+            // separate words: cmd.exe can't read a quoted line's \" escapes
+            assert_eq!(args, &["/k", "py", r"C:\work\hello world.py"]);
+            assert_eq!(dir.as_deref(), Some(Path::new(r"C:\work")));
+        }
+        other => panic!("{} actions", other.len()),
+    }
+    // the choices list what is installed, between Automatic and Other
+    let choices = host.choices(0, "shell_choices", ctx("", (0, 0), None));
+    assert_eq!(choices.first().map(|c| c.0.as_str()), Some("auto"));
+    assert!(choices.iter().any(|c| c.0 == "cmd"));
+    assert_eq!(choices.last().map(|c| c.0.as_str()), Some("other"));
+}
+
+#[test]
 fn tab_colors_go_in_the_tab_menu_and_color_the_tab() {
     let mut host = official("feature-tab-colors");
     let cmds = &host.scripts[0].commands;
@@ -254,10 +281,7 @@ fn capabilities_must_be_granted_by_the_package() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/features/feature-export");
     let script = PluginHost::load_script(&dir.join("main.rhai"), Some(&[])).unwrap();
     assert!(script.capabilities.is_empty());
-    let mut host = PluginHost {
-        scripts: vec![script],
-        errors: Vec::new(),
-    };
+    let mut host = PluginHost { scripts: vec![script], ..PluginHost::default() };
     let out = host.run_command(0, "print", ctx("text", (0, 0), None));
     assert!(out.actions.iter().all(|a| !matches!(a, HostAction::OpenPath(_))));
     assert!(
@@ -292,7 +316,7 @@ fn math_writes_results_as_exact_edits() {
 
 #[test]
 fn replace_ranges_maps_the_selection() {
-    let mut host = PluginHost { scripts: Vec::new(), errors: Vec::new() };
+    let mut host = PluginHost::default();
     let dir = std::env::temp_dir().join(format!("notey-ranges-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.rhai");

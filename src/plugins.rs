@@ -24,13 +24,18 @@ use rhai::{Array, Dynamic, Engine, ImmutableString, Map, Scope, AST};
 /// (capability-gated) and the `net` event.
 /// 5: commands in the tab right-click menu (`menu: "Tab"`), tab colors
 /// (`tab_color`, `set_tab_color`), and color names that follow the theme.
-pub const API_VERSION: i64 = 5;
+/// 6: plugin settings (manifest `settings`, `notey.settings.get`),
+/// `notey.process.start` (capability-gated), `notey.fs.exists`,
+/// `notey.app.which` and `notey.app.env`.
+pub const API_VERSION: i64 = 6;
 
 /// Permissions a script must declare (and, for installed plugins, the
 /// package must grant) before it can use the matching API.
 pub const CAP_FS_WRITE: &str = "fs.write";
 pub const CAP_OPEN: &str = "open";
 pub const CAP_NET: &str = "net";
+/// Start programs (`notey.process.start`).
+pub const CAP_RUN: &str = "run";
 
 // ---------- host-visible results of a script run ----------
 
@@ -55,6 +60,8 @@ pub enum HostAction {
     Fetch(String),
     /// The color of the script's tab ("#rrggbb"), or none.
     SetTabColor(Option<String>),
+    /// Start a program: the program, its arguments, the folder to start in.
+    Start(String, Vec<String>, Option<PathBuf>),
 }
 
 /// Condition under which a command or key hook is active.
@@ -143,6 +150,8 @@ pub struct ScriptCtx {
     pub sel_quiet: bool,
     /// The tab's color ("#rrggbb"), or "".
     pub tab_color: String,
+    /// The running script's settings (see `plugin_settings`).
+    pub settings: std::collections::BTreeMap<String, String>,
 }
 
 /// Set or clear the colors of a char range of the script's text.
@@ -198,12 +207,16 @@ pub struct Script {
     /// Permissions in effect: declared by the script and, for installed
     /// plugins, granted by the package manifest.
     pub capabilities: Vec<String>,
+    /// Settings it declares, shown in a Settings section of its own.
+    pub settings: Vec<crate::plugin_settings::Setting>,
 }
 
 #[derive(Default)]
 pub struct PluginHost {
     pub scripts: Vec<Script>,
     pub errors: Vec<String>,
+    /// The saved values of plugin settings.
+    store: crate::plugin_settings::Store,
 }
 
 impl PluginHost {
@@ -214,7 +227,7 @@ impl PluginHost {
     /// Load the user's own scripts plus the entry scripts of enabled
     /// feature plugins (`(script path, capabilities the package grants)`).
     pub fn load(feature_scripts: &[(PathBuf, Vec<String>)]) -> Self {
-        let mut host = Self::default();
+        let mut host = Self { store: crate::plugin_settings::load(), ..Self::default() };
         // (path, granted): None = the user's own script, trusted as written
         let mut paths: Vec<(PathBuf, Option<Vec<String>>)> = Vec::new();
         if let Some(dir) = Self::scripts_dir() {
@@ -349,6 +362,7 @@ impl PluginHost {
             events,
             keys,
             capabilities,
+            settings: crate::plugin_settings::parse(manifest.get("settings")),
         })
     }
 
@@ -424,6 +438,27 @@ fn join(parts, sep) {
     }
 
 
+    /// The values of a script's settings.
+    pub fn setting_values(&self, script_idx: usize) -> std::collections::BTreeMap<String, String> {
+        let s = &self.scripts[script_idx];
+        crate::plugin_settings::values(&self.store, &s.name, &s.settings)
+    }
+
+    /// Change one of a script's settings, and save it.
+    pub fn set_setting(&mut self, script_idx: usize, id: &str, value: &str) {
+        let name = self.scripts[script_idx].name.clone();
+        self.store.entry(name).or_default().insert(id.to_string(), value.to_string());
+        crate::plugin_settings::save(&self.store);
+    }
+
+    /// The choices that a script's function `fn_name` lists.
+    pub fn choices(&mut self, script_idx: usize, fn_name: &str, ctx: ScriptCtx) -> Vec<(String, String)> {
+        match self.run_fn(script_idx, fn_name, Vec::new(), ctx).1 {
+            Some(v) => crate::plugin_settings::parse_choices(v),
+            None => Vec::new(),
+        }
+    }
+
     /// Run `on_command` in the given script. Returns the mutated context.
     pub fn run_command(&mut self, script_idx: usize, cmd_id: &str, ctx: ScriptCtx) -> ScriptCtx {
         self.run_fn(script_idx, "on_command", vec![Dynamic::from(ImmutableString::from(cmd_id))], ctx).0
@@ -456,6 +491,7 @@ fn join(parts, sep) {
         ctx.script_name = name.clone();
         ctx.capabilities = self.scripts[script_idx].capabilities.clone();
         ctx.script_dir = self.scripts[script_idx].path.parent().map(Path::to_path_buf).unwrap_or_default();
+        ctx.settings = self.setting_values(script_idx);
         let shared: Ctx = Rc::new(RefCell::new(ctx));
         let engine = api_engine(shared.clone()); // resolves `notey` (see on_var)
         let mut scope = Scope::new();
@@ -515,6 +551,7 @@ fn join(parts, sep) {
                     history: c.history,
                     sel_quiet: c.sel_quiet,
                     tab_color: c.tab_color.clone(),
+                    settings: c.settings.clone(),
                 }
             }
         };
@@ -640,6 +677,36 @@ struct FsApi {
 #[derive(Clone)]
 struct WasmApi {
     ctx: Ctx,
+}
+#[derive(Clone)]
+struct SettingsApi {
+    ctx: Ctx,
+}
+#[derive(Clone)]
+struct ProcessApi {
+    ctx: Ctx,
+}
+
+/// The program `name` on the PATH ("pwsh" finds pwsh.exe), or "".
+fn which(name: &str) -> String {
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".into())
+        .split(';')
+        .filter(|e| !e.is_empty())
+        .map(|e| e.to_ascii_lowercase())
+        .collect();
+    let has_ext = Path::new(name).extension().is_some();
+    let Some(path) = std::env::var_os("PATH") else { return String::new() };
+    for dir in std::env::split_paths(&path) {
+        let candidates =
+            std::iter::once(dir.join(name)).filter(|_| has_ext).chain(exts.iter().map(|e| dir.join(format!("{name}{e}"))));
+        for c in candidates {
+            if c.is_file() {
+                return c.display().to_string();
+            }
+        }
+    }
+    String::new()
 }
 #[derive(Clone)]
 struct NetApi {
@@ -1007,6 +1074,33 @@ fn api_engine(ctx: Ctx) -> Engine {
             Some(name.to_string())
         };
         e.ctx.borrow_mut().actions.push(HostAction::SetLanguage(lang));
+    });
+
+    // ---- API 6: settings, processes, files and the environment ----
+    engine.register_type::<SettingsApi>().register_type::<ProcessApi>();
+    engine.register_get("settings", |n: &mut NoteyApi| SettingsApi { ctx: n.ctx.clone() });
+    engine.register_get("process", |n: &mut NoteyApi| ProcessApi { ctx: n.ctx.clone() });
+    engine.register_fn("get", |s: &mut SettingsApi, id: ImmutableString| -> ImmutableString {
+        s.ctx.borrow().settings.get(id.as_str()).cloned().unwrap_or_default().into()
+    });
+    fn start(p: &mut ProcessApi, program: ImmutableString, args: Array, dir: Option<ImmutableString>) -> ApiResult<()> {
+        let mut c = p.ctx.borrow_mut();
+        if !c.has(CAP_RUN) {
+            return Err(denied(CAP_RUN));
+        }
+        let args = args.into_iter().map(|a| a.to_string()).collect();
+        let dir = dir.filter(|d| !d.is_empty()).map(|d| PathBuf::from(d.as_str()));
+        c.actions.push(HostAction::Start(program.to_string(), args, dir));
+        Ok(())
+    }
+    engine.register_fn("start", |p: &mut ProcessApi, program: ImmutableString, args: Array| start(p, program, args, None));
+    engine.register_fn("start", |p: &mut ProcessApi, program: ImmutableString, args: Array, dir: ImmutableString| {
+        start(p, program, args, Some(dir))
+    });
+    engine.register_fn("exists", |_: &mut FsApi, path: ImmutableString| -> bool { Path::new(path.as_str()).exists() });
+    engine.register_fn("which", |_: &mut AppApi, name: ImmutableString| -> ImmutableString { which(&name).into() });
+    engine.register_fn("env", |_: &mut AppApi, name: ImmutableString| -> ImmutableString {
+        std::env::var(name.as_str()).unwrap_or_default().into()
     });
 
     // ---- editor (API 5): the tab's color ----

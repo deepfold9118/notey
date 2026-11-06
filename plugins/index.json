@@ -120,6 +120,27 @@
       "version": "1.0.0"
     },
     {
+      "capabilities": [
+        "run",
+        "fs.write"
+      ],
+      "description": "Open in Terminal and Run in Terminal (Ctrl+F5) in the tab menu, with your choice of terminal app and shell in Settings > Terminal. Running a file saves it first; an untitled tab runs from a temporary copy.",
+      "dir": "features/feature-terminal",
+      "files": [
+        {
+          "path": "main.rhai",
+          "sha256": "b110b2208d305ebb4d4838a9b099bf1cac4afb178a5b78c757fb48a7ee14cba4",
+          "size": 13111
+        }
+      ],
+      "id": "feature-terminal",
+      "kind": "feature",
+      "license": "Apache-2.0",
+      "name": "Terminal",
+      "script": "main.rhai",
+      "version": "1.0.0"
+    },
+    {
       "description": "Colors the selected text and its background with the 16 terminal (ANSI) colors, from the right-click menu or Edit menu. The colors stay while the tab is open; they are not saved to the file.",
       "dir": "features/feature-text-color",
       "files": [

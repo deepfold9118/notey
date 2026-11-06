@@ -1,12 +1,12 @@
 # Notey Plugin API
 
-> **Implementation status (November 2026, API 5):** Rhai scripts are live
+> **Implementation status (November 2026, API 6):** Rhai scripts are live
 > in `src/plugins.rs`. They come from two places: your own scripts in
 > `%APPDATA%\Notey\scripts`, and Feature plugins installed from the
 > Plugins window (see [`plugins/README.md`](https://github.com/deepfold9118/notey/blob/main/plugins/README.md)). The
-> official Markdown Tools, Word Count, Autocorrect, Export & Print, Math
-> and Tab Colors plugins in `plugins/features/` are working examples of
-> everything below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
+> official Markdown Tools, Word Count, Autocorrect, Export & Print, Math,
+> Tab Colors and Terminal plugins in `plugins/features/` are working
+> examples of everything below. WebAssembly runs as modules a script calls (`notey.wasm.run`),
 > not as plugins of their own. Not yet implemented: pos/line conversions,
 > `begin_undo_group`/`end_undo_group` (`set_history` covers plugin
 > edits), encoding/line-ending setters, `confirm`/`prompt`/`form`/panels,
@@ -14,6 +14,35 @@
 >
 > **Scope note:** `notey` is available in every function of a script,
 > including your own helper functions.
+
+## API 6 additions (quick reference)
+
+| Call or field | Notes |
+|---|---|
+| manifest `settings: [...]` | settings of the plugin, shown in a Settings section of its own named after it, only while the plugin is enabled (below) |
+| `notey.settings.get(id) -> String` | a setting's value: what the user chose, else its `initial` value. A switch is `"true"` or `"false"` |
+| `notey.process.start(program, args)` / `start(program, args, folder)` | start a program with an array of arguments, in `folder`; needs `run`. A console program gets a console window of its own. Notey quotes each argument the usual Windows way, which `cmd.exe` doesn't read inside one argument, so give the Command Prompt its command as separate words |
+| `notey.fs.exists(path) -> bool` | whether a file or folder exists; needs no permission |
+| `notey.app.which(name) -> String` | the program `name` on the PATH (`"pwsh"` finds `pwsh.exe`), or `""` |
+| `notey.app.env(name) -> String` | an environment variable, or `""` |
+
+A command of the tab menu that calls `notey.buffers.save()` saves the tab
+it runs on, which need not be the active one.
+
+**Settings.** Each entry of `settings` is a map:
+
+| Key | Notes |
+|---|---|
+| `id` | the name for `notey.settings.get` |
+| `title`, `description` | shown in the Settings row |
+| `kind` | `"choice"` (a drop-down), `"text"`, `"path"` (text with a Browse button) or `"toggle"` (a switch) |
+| `initial` | the value until the user changes it (`default` is a reserved word in Rhai) |
+| `choices` | for a drop-down: `[value, label]` pairs, `#{ value, label }` maps or plain strings. Or the name of a script function that returns them; Notey calls it each time the section opens, so it can list what is installed |
+| `show_if: #{ setting, value }` | show the row only while another setting has this value (or one of an array of values) |
+
+Notey keeps the values in `plugin_settings.json` in its data folder. The
+official Terminal plugin (`plugins/features/feature-terminal`) is an
+example of everything above.
 
 ## API 5 additions (quick reference)
 
@@ -292,7 +321,9 @@ the user at install time in Plugins Admin, revocable there:
 
 - `fs.read` / `fs.write` — file access beyond open buffers (optionally scoped to paths)
 - `net` — HTTP requests via a host-provided fetch (no raw sockets)
-- `process` — spawn external programs (WASM tier only, never scripts)
+- `run` — start programs (`notey.process.start`), since API 6. This is as
+  powerful as running anything yourself, so the install prompt says so
+  plainly; the official Terminal plugin is the one that needs it
 
 ## Distribution
 

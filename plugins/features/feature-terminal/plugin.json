@@ -1,0 +1,11 @@
+{
+  "id": "feature-terminal",
+  "kind": "feature",
+  "name": "Terminal",
+  "version": "1.0.0",
+  "description": "Open in Terminal and Run in Terminal (Ctrl+F5) in the tab menu, with your choice of terminal app and shell in Settings > Terminal. Running a file saves it first; an untitled tab runs from a temporary copy.",
+  "license": "Apache-2.0",
+  "script": "main.rhai",
+  "capabilities": ["run", "fs.write"],
+  "files": ["main.rhai"]
+}

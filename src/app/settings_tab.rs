@@ -3,9 +3,12 @@
 
 use gpui::{anchored, deferred, div, prelude::*, px, uniform_list, AnyElement, Context, Corner, SharedString};
 
-use super::find::{field_editor, field_text, field_theme, select_field};
+use std::collections::HashMap;
+
+use super::find::{field_editor, field_text, field_theme, select_field, set_field_text};
 use super::*;
 use crate::packages::Kind;
+use crate::plugin_settings::{self, Kind as SettingKind, Setting};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Section {
@@ -14,6 +17,8 @@ pub(super) enum Section {
     Spellcheck,
     Plugins,
     Updates,
+    /// The settings of the plugin script at this index.
+    Plugin(usize),
 }
 
 impl Section {
@@ -27,6 +32,7 @@ impl Section {
             Section::Spellcheck => "Spellcheck",
             Section::Plugins => "Plugins",
             Section::Updates => "Updates",
+            Section::Plugin(_) => "Plugin",
         }
     }
 }
@@ -40,6 +46,14 @@ pub(super) struct SettingsUi {
     fonts: Vec<SharedString>,
     config: Compartment,
     _observe: Subscription,
+    /// Choices that plugin scripts listed, by (script, setting); listed
+    /// again each time their section opens.
+    plugin_choices: HashMap<(usize, String), Vec<(String, String)>>,
+    /// Text fields of plugin settings, by (script, setting).
+    plugin_fields: HashMap<(usize, String), Entity<EditorView>>,
+    plugin_subs: Vec<Subscription>,
+    /// The open drop-down of a plugin setting.
+    open_choice: Option<(usize, String)>,
 }
 
 impl SettingsUi {
@@ -47,12 +61,33 @@ impl SettingsUi {
         let config = Compartment::new();
         let font_filter = field_editor(&config, p, cx);
         let observe = cx.observe(&font_filter, |_, _, cx| cx.notify());
-        SettingsUi { section: Section::Editor, font_menu: false, font_filter, fonts: Vec::new(), config, _observe: observe }
+        SettingsUi {
+            section: Section::Editor,
+            font_menu: false,
+            font_filter,
+            fonts: Vec::new(),
+            config,
+            _observe: observe,
+            plugin_choices: HashMap::new(),
+            plugin_fields: HashMap::new(),
+            plugin_subs: Vec::new(),
+            open_choice: None,
+        }
     }
 
     pub(super) fn set_palette(&self, p: &Palette, cx: &mut App) {
-        let effect = self.config.reconfigure(THEME.of(Arc::new(field_theme(p))));
-        self.font_filter.update(cx, |view, cx| view.dispatch_spec(TransactionSpec::new().effect(effect), cx));
+        for view in std::iter::once(&self.font_filter).chain(self.plugin_fields.values()) {
+            let effect = self.config.reconfigure(THEME.of(Arc::new(field_theme(p))));
+            view.update(cx, |view, cx| view.dispatch_spec(TransactionSpec::new().effect(effect), cx));
+        }
+    }
+
+    /// The scripts were reloaded: their indices may have changed.
+    pub(super) fn forget_plugins(&mut self) {
+        self.plugin_choices.clear();
+        self.plugin_fields.clear();
+        self.plugin_subs.clear();
+        self.open_choice = None;
     }
 }
 
@@ -90,6 +125,29 @@ impl NoteyApp {
                         cx.notify();
                     }))
             }))
+            // A section for each enabled plugin that has settings.
+            .children(self.plugin_sections().into_iter().map(|(i, name)| {
+                let section = Section::Plugin(i);
+                let selected = self.settings_ui.section == section;
+                div()
+                    .id(("plugin-section", i))
+                    .h(px(32.))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .when(selected, |d| d.bg(p.control_active))
+                    .when(!selected, |d| d.hover(|s| s.bg(p.control_hover)))
+                    .child(name)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings_ui.section = section;
+                        this.settings_ui.font_menu = false;
+                        this.settings_ui.open_choice = None;
+                        // look again for what is installed
+                        this.settings_ui.plugin_choices.retain(|(s, _), _| *s != i);
+                        cx.notify();
+                    }))
+            }))
             .child(div().flex_1())
             .child(
                 self.text_button("reset-settings", "Reset to defaults")
@@ -102,6 +160,11 @@ impl NoteyApp {
             Section::Spellcheck => self.settings_spellcheck(cx),
             Section::Plugins => self.settings_plugins(window, cx),
             Section::Updates => self.settings_updates(cx),
+            Section::Plugin(i) => self.settings_plugin(i, cx),
+        };
+        let title: SharedString = match section {
+            Section::Plugin(i) => self.scripting.host.scripts.get(i).map_or_else(String::new, |s| s.name.clone()).into(),
+            s => s.label().into(),
         };
         div().flex_1().min_h_0().flex().bg(p.editor).child(nav).child(
             div().id("settings-content").flex_1().min_w_0().overflow_y_scroll().child(
@@ -112,7 +175,7 @@ impl NoteyApp {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().mb_2().text_size(px(20.)).font_weight(gpui::FontWeight::SEMIBOLD).child(section.label()))
+                    .child(div().mb_2().text_size(px(20.)).font_weight(gpui::FontWeight::SEMIBOLD).child(title))
                     .child(content),
             ),
         )
@@ -449,6 +512,197 @@ impl NoteyApp {
                     .into_any_element(),
             ))
             .into_any_element()
+    }
+
+    /// The enabled plugin scripts with settings: (script index, name).
+    pub(super) fn plugin_sections(&self) -> Vec<(usize, SharedString)> {
+        self.scripting
+            .host
+            .scripts
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.settings.is_empty())
+            .map(|(i, s)| (i, s.name.clone().into()))
+            .collect()
+    }
+
+    /// The choices of a plugin's drop-down setting, listing them from the
+    /// script when they aren't known yet.
+    pub(super) fn plugin_setting_choices(&mut self, i: usize, s: &Setting, cx: &mut Context<Self>) -> Vec<(String, String)> {
+        let Some(f) = &s.choices_fn else { return s.choices.clone() };
+        let key = (i, s.id.clone());
+        if let Some(list) = self.settings_ui.plugin_choices.get(&key) {
+            return list.clone();
+        }
+        let list = match self.script_snapshot(cx) {
+            Some(ctx) => self.scripting.host.choices(i, f, ctx),
+            None => Vec::new(),
+        };
+        self.surface_plugin_errors(cx);
+        self.settings_ui.plugin_choices.insert(key, list.clone());
+        list
+    }
+
+    /// A plugin's Settings section: its settings, as it declares them.
+    fn settings_plugin(&mut self, i: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(settings) = self.scripting.host.scripts.get(i).map(|s| s.settings.clone()) else {
+            return div().into_any_element();
+        };
+        let values = self.scripting.host.setting_values(i);
+        let mut body = div().flex().flex_col().gap_2();
+        for s in settings.iter().filter(|s| plugin_settings::visible(s, &values)) {
+            let value = values.get(&s.id).cloned().unwrap_or_default();
+            let control = match s.kind {
+                SettingKind::Toggle => {
+                    let on = value == "true";
+                    let id = s.id.clone();
+                    self.switch(SharedString::from(format!("plugin-toggle-{i}-{}", s.id)), on)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.scripting.host.set_setting(i, &id, if on { "false" } else { "true" });
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                }
+                SettingKind::Choice => self.plugin_choice(i, s, &value, cx),
+                SettingKind::Text | SettingKind::Path => self.plugin_text(i, s, &value, cx),
+            };
+            body = body.child(self.row(s.title.clone(), s.description.clone(), control));
+        }
+        body.into_any_element()
+    }
+
+    /// A drop-down for a plugin setting.
+    fn plugin_choice(&mut self, i: usize, s: &Setting, value: &str, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        let choices = self.plugin_setting_choices(i, s, cx);
+        let label = choices.iter().find(|(v, _)| v == value).map_or_else(|| value.to_string(), |(_, l)| l.clone());
+        let key = (i, s.id.clone());
+        let open = self.settings_ui.open_choice.as_ref() == Some(&key);
+        let button = div()
+            .id(SharedString::from(format!("plugin-choice-{i}-{}", s.id)))
+            .min_w(px(240.))
+            .h(px(30.))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .rounded(px(4.))
+            .bg(p.control_hover)
+            .border_1()
+            .border_color(p.stroke)
+            .hover(|s| s.bg(p.control_active))
+            .child(label)
+            .child(div().font_family(self.icon_font.clone()).text_size(px(10.)).child("\u{E70D}"))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.settings_ui.open_choice = if open { None } else { Some(key.clone()) };
+                cx.notify();
+            }));
+        let mut picker = div().relative().child(button);
+        if open {
+            let items = choices.into_iter().enumerate().map(|(n, (v, l))| {
+                let id = s.id.clone();
+                let selected = v == value;
+                div()
+                    .id(("plugin-choice-item", n))
+                    .h(px(ROW_H))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.))
+                    .when(selected, |d| d.bg(p.control_active))
+                    .hover(|s| s.bg(p.control_hover))
+                    .child(l)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings_ui.open_choice = None;
+                        this.scripting.host.set_setting(i, &id, &v);
+                        cx.notify();
+                    }))
+            });
+            let menu = div()
+                .id("plugin-choice-menu")
+                .occlude()
+                .min_w(px(260.))
+                .p_1p5()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .bg(p.popup)
+                .border_1()
+                .border_color(p.stroke)
+                .rounded(px(8.))
+                .shadow_lg()
+                .children(items)
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.settings_ui.open_choice = None;
+                    cx.notify();
+                }));
+            picker = picker.child(
+                div()
+                    .absolute()
+                    .top(px(32.))
+                    .right_0()
+                    .child(deferred(anchored().anchor(Corner::TopRight).snap_to_window_with_margin(px(8.)).child(menu))),
+            );
+        }
+        picker.into_any_element()
+    }
+
+    /// A text field for a plugin setting, with Browse for a path. Each
+    /// change is saved.
+    fn plugin_text(&mut self, i: usize, s: &Setting, value: &str, cx: &mut Context<Self>) -> AnyElement {
+        let key = (i, s.id.clone());
+        let field = match self.settings_ui.plugin_fields.get(&key) {
+            Some(f) => f.clone(),
+            None => {
+                let f = field_editor(&self.settings_ui.config, &self.palette, cx);
+                set_field_text(&f, value, cx);
+                // the cursor at the end, not the text selected
+                f.update(cx, |view, cx| {
+                    let end = view.state().doc().len();
+                    view.dispatch_spec(TransactionSpec::new().selection(codemirror_state::EditorSelection::single(end, end)), cx);
+                });
+                let id = s.id.clone();
+                let sub = cx.observe(&f, move |this, f, cx| {
+                    let text = field_text(&f, cx).replace(['\r', '\n'], "");
+                    if this.scripting.host.setting_values(i).get(&id) != Some(&text) {
+                        this.scripting.host.set_setting(i, &id, &text);
+                    }
+                });
+                self.settings_ui.plugin_subs.push(sub);
+                self.settings_ui.plugin_fields.insert(key, f.clone());
+                f
+            }
+        };
+        let mut row = div()
+            .w(px(340.))
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(self.field(SharedString::from(format!("plugin-field-{i}-{}", s.id)), &field, cx));
+        if s.kind == SettingKind::Path {
+            row = row.child(
+                self.text_button(SharedString::from(format!("plugin-browse-{i}-{}", s.id)), "Browse\u{2026}")
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        let picked = cx.prompt_for_paths(gpui::PathPromptOptions {
+                            files: true,
+                            directories: false,
+                            multiple: false,
+                            prompt: None,
+                        });
+                        let field = field.clone();
+                        cx.spawn_in(window, async move |this, cx| {
+                            if let Ok(Ok(Some(paths))) = picked.await {
+                                if let Some(path) = paths.first() {
+                                    let _ = this.update(cx, |_, cx| set_field_text(&field, &path.display().to_string(), cx));
+                                }
+                            }
+                        })
+                        .detach();
+                    })),
+            );
+        }
+        row.into_any_element()
     }
 
     pub(super) fn section_heading(&self, title: &'static str) -> impl IntoElement {

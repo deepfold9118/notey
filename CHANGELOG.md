@@ -6,6 +6,31 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Terminal, a new Feature plugin: Open in Terminal and Run in Terminal in
+  the tab menu, and Ctrl+F5 to run the active tab. Choose the terminal
+  app (Windows Terminal, Alacritty, WezTerm, Warp or a console window)
+  and the shell (PowerShell 7, Windows PowerShell, Command Prompt, Git
+  Bash or WSL) in Settings > Terminal, which lists what is installed, or
+  pick Other and give the program's path. Running a file saves it first;
+  an untitled tab runs from a temporary copy. Python, JavaScript,
+  PowerShell, batch files, shell scripts, Ruby, Lua, Perl and Go each have
+  a command you can change. Warp can't be given a command, so with Warp
+  a file runs in a console window.
+- Plugin settings: a plugin can declare settings, and Notey shows them in
+  a Settings section named after the plugin while it is enabled.
+- Plugin API 6: settings (`notey.settings.get`), `notey.process.start`
+  behind the new `run` permission, `notey.fs.exists`, `notey.app.which`
+  and `notey.app.env`.
+
+### Changed
+- The plugin list describes a plugin's permissions in plain words, such
+  as "download from the internet" or "start programs".
+
+### Fixed
+- `notey.buffers.save()` in a command of the tab menu saves the tab it
+  runs on, not the active tab.
+
 ## [0.10.1] - 2026-11-05
 
 ### Changed
