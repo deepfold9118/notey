@@ -12,8 +12,17 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 const LATEST_RELEASE: &str = "https://api.github.com/repos/deepfold9118/notey/releases/latest";
-const INSTALLER: &str = "NoteySetup.exe";
-const CHECKSUM: &str = "NoteySetup.exe.sha256";
+/// The platform in the installer's name.
+pub const PLATFORM: &str = "windows";
+/// The installer's name before 0.10.1, which releases also carry so that
+/// older versions of Notey can still update.
+const LEGACY_INSTALLER: &str = "NoteySetup.exe";
+
+/// The installer of `version`: "notey_setup_windows_0.10.1.exe". Its
+/// SHA-256 file adds ".sha256".
+pub fn installer_name(version: &str) -> String {
+    format!("notey_setup_{PLATFORM}_{version}.exe")
+}
 /// The installer is a few megabytes; refuse anything absurd.
 const MAX_INSTALLER_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -68,20 +77,21 @@ pub fn fetch(source: &str, limit: u64) -> Result<Vec<u8>, String> {
 pub fn parse_release(json: &[u8]) -> Result<Release, String> {
     let v: serde_json::Value = serde_json::from_slice(json).map_err(|e| format!("bad release data: {e}"))?;
     let tag = v["tag_name"].as_str().ok_or("the release has no version")?;
+    let version = tag.trim_start_matches('v').to_string();
     let asset = |name: &str| {
         v["assets"]
             .as_array()
             .and_then(|a| a.iter().find(|x| x["name"] == name))
             .and_then(|x| x["browser_download_url"].as_str())
             .map(str::to_string)
-            .ok_or_else(|| format!("the release has no {name}"))
     };
-    Ok(Release {
-        version: tag.trim_start_matches('v').to_string(),
-        notes: v["body"].as_str().unwrap_or("").to_string(),
-        installer_url: asset(INSTALLER)?,
-        checksum_url: asset(CHECKSUM)?,
-    })
+    // The installer and its checksum, by name; older releases use the
+    // legacy name.
+    let pair = |name: &str| Some((asset(name)?, asset(&format!("{name}.sha256"))?));
+    let (installer_url, checksum_url) = pair(&installer_name(&version))
+        .or_else(|| pair(LEGACY_INSTALLER))
+        .ok_or_else(|| format!("the release has no {}", installer_name(&version)))?;
+    Ok(Release { version, notes: v["body"].as_str().unwrap_or("").to_string(), installer_url, checksum_url })
 }
 
 /// Look up the latest release.
@@ -123,7 +133,7 @@ pub fn download(release: &Release) -> Result<PathBuf, String> {
     }
     let dir = std::env::temp_dir().join("Notey");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("NoteySetup-{}.exe", release.version));
+    let path = dir.join(installer_name(&release.version));
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -163,6 +173,14 @@ mod tests {
         assert_eq!(r.notes, "Fixes");
         assert_eq!(r.installer_url, "https://x/NoteySetup.exe");
         assert!(parse_release(br#"{"tag_name": "v1", "assets": []}"#).is_err());
+        // Since 0.10.1: the new name, preferred over the legacy copy.
+        let json = br#"{"tag_name": "v0.10.1", "assets": [
+            {"name": "NoteySetup.exe", "browser_download_url": "https://x/NoteySetup.exe"},
+            {"name": "NoteySetup.exe.sha256", "browser_download_url": "https://x/NoteySetup.exe.sha256"},
+            {"name": "notey_setup_windows_0.10.1.exe", "browser_download_url": "https://x/new.exe"},
+            {"name": "notey_setup_windows_0.10.1.exe.sha256", "browser_download_url": "https://x/new.sha256"}]}"#;
+        let r = parse_release(json).unwrap();
+        assert_eq!((r.installer_url.as_str(), r.checksum_url.as_str()), ("https://x/new.exe", "https://x/new.sha256"));
     }
 
     #[test]

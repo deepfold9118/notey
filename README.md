@@ -166,7 +166,7 @@ WebAssembly module that runs sandboxed (the Math plugin's engine is
 ISCC.exe installer\notey.iss
 ```
 
-which produces `installer_out\NoteySetup.exe`. The installer is per-user (no
+which produces `installer_out\notey_setup_windows_<version>.exe`. The installer is per-user (no
 admin rights needed) and:
 
 - installs to `%LOCALAPPDATA%\Programs\Notey` with a Start menu entry and
@@ -191,7 +191,7 @@ mapped out of the binary's panic messages.
 
 ## Download
 
-Grab `NoteySetup.exe` from the
+Grab `notey_setup_windows_<version>.exe` from the
 [latest release](https://github.com/deepfold9118/notey/releases/latest).
 The installer is per-user and needs no administrator rights. See
 [CHANGELOG.md](CHANGELOG.md) for what changed in each version.

@@ -1,5 +1,5 @@
 #define MyAppName "Notey"
-#define MyAppVersion "0.10.0"
+#define MyAppVersion "0.10.1"
 #define MyAppPublisher "Notey"
 #define MyAppExeName "notey.exe"
 ; extensions offered in the Open With menu
@@ -19,7 +19,7 @@ PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 DisableDirPage=no
 OutputDir={#SourcePath}\..\installer_out
-OutputBaseFilename=NoteySetup
+OutputBaseFilename=notey_setup_windows_{#MyAppVersion}
 SetupIconFile={#SourcePath}\..\notey_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}

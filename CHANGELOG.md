@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-05
+
+### Changed
+- The installer is named `notey_setup_windows_<version>.exe` (with a
+  `.sha256` file beside it), and Notey's updater looks for that name.
+  Releases also carry it as `NoteySetup.exe`, so older versions of Notey
+  can still update.
+
 ### Fixed
 - Python with type hints (`count: int = 10`, `def f(a: int) -> float:`) is
   recognized from its text; a short typed script stayed Plain Text.
@@ -389,7 +397,8 @@ First public release.
 - Initial notepad: dark mode, tabs, Hunspell spellcheck, find/replace,
   encodings and line endings, zoom, printing.
 
-[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/deepfold9118/notey/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/deepfold9118/notey/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/deepfold9118/notey/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/deepfold9118/notey/compare/v0.8.8...v0.9.0
 [0.8.8]: https://github.com/deepfold9118/notey/compare/v0.8.7...v0.8.8

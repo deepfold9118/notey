@@ -6,7 +6,7 @@ including live math in any tab.
 
 ## Download
 
-Get `NoteySetup.exe` from the
+Get `notey_setup_windows_<version>.exe` from the
 [latest release](https://github.com/deepfold9118/notey/releases/latest).
 It installs for your user account only, so it needs no administrator
 rights, and Notey keeps itself up to date after that.

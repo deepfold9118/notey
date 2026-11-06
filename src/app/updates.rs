@@ -15,7 +15,7 @@ fn summary(notes: &str) -> String {
     let lines: Vec<&str> = notes
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.contains("NoteySetup.exe"))
+        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.contains("NoteySetup.exe") && !l.contains("notey_setup_"))
         .map(|l| l.trim_start_matches("- "))
         .collect();
     let mut text = lines.join("\n");
